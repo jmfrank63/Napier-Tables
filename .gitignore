@@ -1,0 +1,14 @@
+.worktrees/
+.superpowers/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+web/generated/
+web/*.html
+web/*.md
+web/*.pdf
