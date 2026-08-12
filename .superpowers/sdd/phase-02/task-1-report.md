@@ -74,4 +74,5 @@ behavioral coverage were preserved.
 - Focused tests: `python -m pytest tests/test_integer_log.py -k 'round or text' -q`
 - Full suite: `python -m pytest -q`
 - Diff check: `git diff --check`
-- Fix commit: `ea4b9e2`
+- Fix commit: `10756ce1ce0057ec670dc1980170ed70d7e24745` (report included in
+  the amended commit)
