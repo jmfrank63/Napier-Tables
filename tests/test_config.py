@@ -10,3 +10,7 @@ def test_package_imports_and_python_requirement_metadata():
         (Path(__file__).parents[1] / "pyproject.toml").read_text()
     )["project"]
     assert metadata["requires-python"] == ">=3.14"
+    assert any(
+        requirement.startswith("pytest")
+        for requirement in metadata["optional-dependencies"]["test"]
+    )
