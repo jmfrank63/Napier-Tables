@@ -157,6 +157,20 @@ The implementation plan will be organized as separate phase directories rather t
 - one or more numbered task plans, each using tests-first red-green-refactor steps;
 - a verification record or checklist when the phase has an externally observable deliverable.
 
+Every task plan must be detailed to the individual implementation unit. For each class, function, constant, exception, and public command introduced or changed, the plan must specify:
+
+- the exact file path and symbol name;
+- the complete Python signature, including parameter and return types where applicable;
+- the symbol's single responsibility and invariants;
+- the symbols it consumes and the symbols that consume it;
+- the exact failing test that defines its required behavior;
+- boundary cases and expected exceptions;
+- the implementation sequence and refactoring constraints;
+- the command used to run its focused test and the expected result;
+- the phase handoff contract for symbols used by later phases.
+
+No plan step may use vague wording such as "add validation," "handle edge cases," or "write tests" without naming the specific symbols, inputs, expected outputs, and executable test command. The plan must define public interfaces before dependent tasks refer to them, while allowing private helper names to be finalized only within the task that owns them.
+
 The planned phase order is:
 
 1. `01-foundation`: initialize packaging, command conventions, test harness, and configuration types.
