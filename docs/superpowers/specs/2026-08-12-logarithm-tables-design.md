@@ -124,6 +124,12 @@ Napier-Tables/
 │   └── styles.css
 ├── docs/superpowers/specs/
 ├── docs/superpowers/plans/
+│   ├── 01-foundation/
+│   ├── 02-integer-engine/
+│   ├── 03-threaded-generation/
+│   ├── 04-html-output/
+│   ├── 05-local-server/
+│   └── 06-markdown-pdf/
 ├── pyproject.toml
 ├── README.md
 └── .gitignore
@@ -141,6 +147,26 @@ The exact module split may be adjusted in the implementation plan only if the pu
 - A base-10, four-fractional-digit example is included.
 - The repository begins with tests and implementation follows the tests-first workflow.
 - The design is committed before the implementation plan is written.
+- The implementation plan is layered: each phase has its own directory containing a phase overview and task-level plan documents.
+
+## Layered implementation plan
+
+The implementation plan will be organized as separate phase directories rather than one monolithic document. Each phase directory will contain:
+
+- `README.md` describing the phase goal, dependencies, acceptance criteria, and handoff to the next phase;
+- one or more numbered task plans, each using tests-first red-green-refactor steps;
+- a verification record or checklist when the phase has an externally observable deliverable.
+
+The planned phase order is:
+
+1. `01-foundation`: initialize packaging, command conventions, test harness, and configuration types.
+2. `02-integer-engine`: establish independently verified integer fixed-point logarithm calculations and rounding.
+3. `03-threaded-generation`: add deterministic chunking and Python 3.14+ `ThreadPoolExecutor` generation.
+4. `04-html-output`: render stable HTML and modern/Napier-inspired themes with CSS.
+5. `05-local-server`: serve generated HTML through the standard-library local web server.
+6. `06-markdown-pdf`: add Markdown and PDF renderers after the HTML pipeline is stable.
+
+Each phase must leave the repository in a tested, usable state. Later phases may consume only interfaces documented by earlier phase handoffs. The phase directories are planning boundaries, not requirements that every phase be implemented in a separate Git branch.
 
 ## Deferred decisions
 
