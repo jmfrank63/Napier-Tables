@@ -1,6 +1,6 @@
 import pytest
 
-from napier_tables.integer_log import round_ratio, scaled_to_text
+from napier_tables.integer_log import CalculationError, round_ratio, scaled_to_text
 
 
 def test_round_ratio_rounds_thirds_to_nearest_scaled_integer():
@@ -20,13 +20,13 @@ def test_round_ratio_handles_negative_numerators_symmetrically():
 
 @pytest.mark.parametrize("denominator", [0, -1])
 def test_round_ratio_rejects_non_positive_denominator(denominator):
-    with pytest.raises(ValueError, match="^denominator must be positive$"):
+    with pytest.raises(CalculationError, match="^denominator must be positive$"):
         round_ratio(1, denominator, 10_000)
 
 
 @pytest.mark.parametrize("scale", [0, -1])
 def test_round_ratio_rejects_non_positive_scale(scale):
-    with pytest.raises(ValueError, match="^scale must be positive$"):
+    with pytest.raises(CalculationError, match="^scale must be positive$"):
         round_ratio(1, 3, scale)
 
 
@@ -49,6 +49,6 @@ def test_scaled_to_text_supports_zero_fractional_digits():
 
 def test_scaled_to_text_rejects_negative_fractional_digits():
     with pytest.raises(
-        ValueError, match="^fractional_digits must be non-negative$"
+        CalculationError, match="^fractional_digits must be non-negative$"
     ):
         scaled_to_text(3_010, -1)
