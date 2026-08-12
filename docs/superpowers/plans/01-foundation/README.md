@@ -29,6 +29,16 @@
 - `models.py`: `class LogRow`, `class LogTable`, `LogTable.values() -> tuple[int, ...]`.
 - `__init__.py`: re-export `TableConfig`, `ConfigurationError`, `LogRow`, and `LogTable`.
 
+## Phase 1 handoff
+
+Foundation verification completed on implementation commit `7e9932f083c0cea1553ae1107608f7f3255c444b`:
+
+- `python -m pytest -q` — 16 passed in 0.06s.
+- `python -m compileall src tests` — completed successfully.
+- `PYTHONPATH=src python -c "from napier_tables import ConfigurationError, LogRow, LogTable, TableConfig; print('exports confirmed')"` — exports confirmed.
+
+Phase 2 may construct `TableConfig`, `LogRow`, and `LogTable` through these public imports. These frozen, slot-based models must not be mutated; Phase 2 must preserve the validated configuration and ordered immutable rows when producing logarithm tables.
+
 ## Tasks
 
 ### 1.1 Project metadata and failing import test
