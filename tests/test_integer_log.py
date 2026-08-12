@@ -1,5 +1,8 @@
+from fractions import Fraction
+
 import pytest
 
+from napier_tables import integer_log
 from napier_tables.integer_log import CalculationError, round_ratio, scaled_to_text
 
 
@@ -52,3 +55,62 @@ def test_scaled_to_text_rejects_negative_fractional_digits():
         CalculationError, match="^fractional_digits must be non-negative$"
     ):
         scaled_to_text(3_010, -1)
+
+
+def test_reduce_ratio_leaves_unity_normalized():
+    assert integer_log._reduce_ratio(1, 1) == (1, 1, 0)
+
+
+@pytest.mark.parametrize(
+    ("numerator", "denominator", "expected"),
+    [
+        (2, 1, (1, 1, 1)),
+        (8, 1, (1, 1, 3)),
+        (1, 2, (1, 1, -1)),
+        (1, 8, (1, 1, -3)),
+    ],
+)
+def test_reduce_ratio_extracts_exact_signed_powers_of_two(
+    numerator, denominator, expected
+):
+    assert integer_log._reduce_ratio(numerator, denominator) == expected
+
+
+def test_reduce_ratio_normalizes_reciprocal_ratio():
+    assert integer_log._reduce_ratio(3, 4) == (3, 2, -1)
+
+
+@pytest.mark.parametrize(
+    ("numerator", "denominator"),
+    [(5, 7), (7, 5), (1, 8), (64, 3)],
+)
+def test_reduce_ratio_preserves_value_in_half_open_normalized_range(
+    numerator, denominator
+):
+    reduced_numerator, reduced_denominator, exponent = integer_log._reduce_ratio(
+        numerator, denominator
+    )
+
+    assert reduced_denominator <= reduced_numerator < 2 * reduced_denominator
+    if exponent >= 0:
+        assert numerator * reduced_denominator == (
+            denominator * reduced_numerator * 2**exponent
+        )
+    else:
+        assert numerator * reduced_denominator * 2 ** (-exponent) == (
+            denominator * reduced_numerator
+        )
+
+
+def test_atanh_bounds_enclose_ln_two_after_one_term():
+    lower, upper = integer_log._atanh_bounds(1, 3, 1)
+
+    assert 2 * lower == Fraction(2, 3)
+    assert 2 * upper == Fraction(25, 36)
+
+
+def test_atanh_bounds_enclose_ln_three_halves_after_one_term():
+    lower, upper = integer_log._atanh_bounds(1, 5, 1)
+
+    assert 2 * lower == Fraction(2, 5)
+    assert 2 * upper == Fraction(73, 180)
