@@ -7,7 +7,7 @@ name = "napier-tables"
 version = "0.1.0"
 description = "Generate logarithm tables with integer arithmetic."
 requires-python = ">=3.14"
-dependencies = []
+dependencies = ["Flask>=3.1", "SQLAlchemy>=2.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
