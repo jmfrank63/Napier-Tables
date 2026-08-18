@@ -12,3 +12,4 @@ web/generated/
 web/*.html
 web/*.md
 web/*.pdf
+instance/

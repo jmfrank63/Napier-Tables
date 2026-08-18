@@ -7,8 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, abort, render_template_string, request
+from markupsafe import escape
 from sqlalchemy import Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+from .config import ConfigurationError, TableConfig
+from .generation import generate_table
+from .integer_log import scaled_to_text
+
+MAX_TABLE_ROWS = 5_000
 
 
 INDEX_TEMPLATE = """<!doctype html>
@@ -163,6 +170,36 @@ INDEX_TEMPLATE = """<!doctype html>
 
     .notice { color: var(--muted); font-size: 0.92rem; }
 
+    .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .table-view { margin-top: 20px; }
+    .table-body { padding: 18px 20px 20px; overflow-x: auto; }
+    table.log-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.95rem;
+    }
+    table.log-table th, table.log-table td {
+      border: 1px solid var(--border);
+      padding: 7px 10px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    table.log-table thead th {
+      background: var(--panel-2);
+      position: sticky;
+      top: 0;
+    }
+    table.log-table tbody tr:nth-child(even) { background: rgba(200, 154, 108, 0.07); }
+    .error {
+      padding: 20px;
+      border: 1px solid var(--accent-soft);
+      border-radius: 18px;
+      color: var(--accent);
+      background: rgba(255,255,255,0.7);
+    }
+
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
     }
@@ -179,17 +216,31 @@ INDEX_TEMPLATE = """<!doctype html>
       <section class="card">
         <header>
           <h2>Create a table</h2>
-          <p>Choose the precision and logarithm precision for a saved configuration.</p>
+          <p>Choose the base, input range, and precision for a saved configuration.</p>
         </header>
         <form id="create-form" class="form-body" method="post" action="/tables" hx-post="/tables" hx-target="#table-list" hx-swap="outerHTML">
           <div class="fields">
             <div class="field">
+              <label for="base">Base</label>
+              <input id="base" name="base" type="number" min="2" step="1" value="10" required>
+            </div>
+            <div class="field-pair">
+              <div class="field">
+                <label for="start">Start</label>
+                <input id="start" name="start" type="number" min="1" step="1" value="1" required>
+              </div>
+              <div class="field">
+                <label for="end">End</label>
+                <input id="end" name="end" type="number" min="1" step="1" value="100" required>
+              </div>
+            </div>
+            <div class="field">
               <label for="precision">Precision</label>
-              <input id="precision" name="precision" type="number" min="1" step="1" required>
+              <input id="precision" name="precision" type="number" min="1" step="1" value="2" required>
             </div>
             <div class="field">
               <label for="log_precision">Log precision</label>
-              <input id="log_precision" name="log_precision" type="number" min="1" step="1" required>
+              <input id="log_precision" name="log_precision" type="number" min="1" step="1" value="4" required>
             </div>
           </div>
           <div class="actions">
@@ -201,6 +252,8 @@ INDEX_TEMPLATE = """<!doctype html>
 
       {{ table_list|safe }}
     </div>
+
+    {{ table_view|safe }}
   </div>
 </body>
 </html>
@@ -220,14 +273,32 @@ TABLE_LIST_TEMPLATE = """<section id="table-list" class="card list-box">
 ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
   <div class="item-title">
     <strong>Table {id}</strong>
-    <span class="meta">Precision {precision} · Log precision {log_precision}</span>
+    <span class="meta">Base {base} · {start}–{end} · Log precision {log_precision}</span>
   </div>
   <div class="item-actions">
+    <button class="button" hx-get="/tables/{id}/table" hx-target="#table-view" hx-swap="outerHTML">Show table</button>
     <button class="link-button" hx-get="/tables/{id}/edit" hx-target="[data-table-id='{id}']" hx-swap="outerHTML">Edit</button>
     <button class="link-button" hx-delete="/tables/{id}" hx-target="#table-list" hx-swap="outerHTML" hx-confirm="Delete this table?">Delete</button>
   </div>
 </article>
 """
+
+TABLE_VIEW_TEMPLATE = """<section id="table-view" class="card table-view">
+  <div class="list-head">
+    <h2>{heading}</h2>
+    <p>{subheading}</p>
+  </div>
+  <div class="table-body">
+    {content}
+  </div>
+</section>
+"""
+
+EMPTY_TABLE_VIEW = TABLE_VIEW_TEMPLATE.format(
+    heading="Generated table",
+    subheading="Choose a saved configuration and select Show table.",
+    content='<div class="empty">No table is being shown yet.</div>',
+)
 
 EDIT_ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
   <form hx-put="/tables/{id}" hx-target="#table-list" hx-swap="outerHTML">
@@ -236,6 +307,20 @@ EDIT_ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
       <span class="meta">SQLite record #{id}</span>
     </div>
     <div class="fields">
+      <div class="field">
+        <label for="base-{id}">Base</label>
+        <input id="base-{id}" name="base" type="number" min="2" step="1" value="{base}" required>
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label for="start-{id}">Start</label>
+          <input id="start-{id}" name="start" type="number" min="1" step="1" value="{start}" required>
+        </div>
+        <div class="field">
+          <label for="end-{id}">End</label>
+          <input id="end-{id}" name="end" type="number" min="1" step="1" value="{end}" required>
+        </div>
+      </div>
       <div class="field">
         <label for="precision-{id}">Precision</label>
         <input id="precision-{id}" name="precision" type="number" min="1" step="1" value="{precision}" required>
@@ -264,25 +349,100 @@ class TableSpec(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     precision: Mapped[int] = mapped_column(Integer, nullable=False)
     log_precision: Mapped[int] = mapped_column(Integer, nullable=False)
+    base: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    start: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    end: Mapped[int] = mapped_column(Integer, nullable=False, default=1_000)
 
 
 def _render_table_list(rows: list[TableSpec]) -> str:
     if not rows:
         content = '<div class="empty">No tables have been created yet.</div>'
     else:
-        content = "\n    ".join(
-            ROW_TEMPLATE.format(
-                id=row.id,
-                precision=row.precision,
-                log_precision=row.log_precision,
-            )
-            for row in rows
-        )
+        content = "\n    ".join(_render_row(row) for row in rows)
     return TABLE_LIST_TEMPLATE.format(content=content)
 
 
-def _render_page(rows: list[TableSpec]) -> str:
-    return render_template_string(INDEX_TEMPLATE, table_list=_render_table_list(rows))
+def _render_row(row: TableSpec) -> str:
+    return ROW_TEMPLATE.format(
+        id=row.id,
+        precision=row.precision,
+        log_precision=row.log_precision,
+        base=row.base,
+        start=row.start,
+        end=row.end,
+    )
+
+
+def _render_edit_row(row: TableSpec) -> str:
+    return EDIT_ROW_TEMPLATE.format(
+        id=row.id,
+        precision=row.precision,
+        log_precision=row.log_precision,
+        base=row.base,
+        start=row.start,
+        end=row.end,
+    )
+
+
+def _spec_to_config(row: TableSpec) -> TableConfig:
+    return TableConfig(
+        base=row.base,
+        fractional_digits=row.log_precision,
+        start=row.start,
+        end=row.end,
+    )
+
+
+def _render_generated_table(row: TableSpec) -> str:
+    """Generate the table for ``row`` and render it, or report why it cannot be."""
+    row_count = row.end - row.start + 1
+    heading = f"Table {row.id}"
+    subheading = (
+        f"Base {row.base} · inputs {row.start}–{row.end} · "
+        f"{row.log_precision} decimal places · {row_count} rows"
+    )
+
+    if row_count > MAX_TABLE_ROWS:
+        return TABLE_VIEW_TEMPLATE.format(
+            heading=heading,
+            subheading=subheading,
+            content=(
+                f'<div class="error">This configuration covers {row_count} rows. '
+                f"Showing at most {MAX_TABLE_ROWS} rows at a time keeps the page "
+                "responsive, so narrow the input range to display it.</div>"
+            ),
+        )
+
+    try:
+        table = generate_table(_spec_to_config(row))
+    except ConfigurationError as exc:
+        return TABLE_VIEW_TEMPLATE.format(
+            heading=heading,
+            subheading=subheading,
+            content=f'<div class="error">{escape(str(exc))}</div>',
+        )
+
+    body = "\n".join(
+        f"<tr><td>{entry.input_value}</td>"
+        f"<td>{scaled_to_text(entry.scaled_value, entry.fractional_digits)}</td></tr>"
+        for entry in table.rows
+    )
+    content = (
+        '<table class="log-table">'
+        f"<thead><tr><th>N</th><th>log<sub>{row.base}</sub> N</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+    )
+    return TABLE_VIEW_TEMPLATE.format(
+        heading=heading, subheading=subheading, content=content
+    )
+
+
+def _render_page(rows: list[TableSpec], table_view: str = EMPTY_TABLE_VIEW) -> str:
+    return render_template_string(
+        INDEX_TEMPLATE,
+        table_list=_render_table_list(rows),
+        table_view=table_view,
+    )
 
 
 def _parse_positive_int(value: str, field_name: str) -> int:
@@ -293,6 +453,19 @@ def _parse_positive_int(value: str, field_name: str) -> int:
     if parsed < 1:
         raise ValueError(f"{field_name} must be a positive integer")
     return parsed
+
+
+def _parse_spec_form() -> dict[str, int]:
+    """Read and validate every table field from the submitted form."""
+    fields = {
+        name: _parse_positive_int(request.form.get(name, ""), name)
+        for name in ("precision", "log_precision", "base", "start", "end")
+    }
+    if fields["base"] < 2:
+        raise ValueError("base must be at least 2")
+    if fields["end"] < fields["start"]:
+        raise ValueError("end must be greater than or equal to start")
+    return fields
 
 
 def _is_htmx_request() -> bool:
@@ -312,9 +485,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     database_url = app.config["DATABASE_URL"]
     if database_url.startswith("sqlite+pysqlite:///"):
-        app.config["DATABASE_PATH"] = database_url.removeprefix(
-            "sqlite+pysqlite:///"
-        )
+        database_path = database_url.removeprefix("sqlite+pysqlite:///")
+        app.config["DATABASE_PATH"] = database_path
+        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
 
     engine = create_engine(database_url, future=True)
     Base.metadata.create_all(engine)
@@ -332,15 +505,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.post("/tables")
     def create_table() -> str:
         try:
-            precision = _parse_positive_int(request.form.get("precision", ""), "precision")
-            log_precision = _parse_positive_int(
-                request.form.get("log_precision", ""), "log_precision"
-            )
+            fields = _parse_spec_form()
         except ValueError:
             abort(400)
 
         with get_session() as session:
-            record = TableSpec(precision=precision, log_precision=log_precision)
+            record = TableSpec(**fields)
             session.add(record)
             session.commit()
             rows = session.scalars(select(TableSpec).order_by(TableSpec.id)).all()
@@ -356,9 +526,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             row = session.get(TableSpec, table_id)
         if row is None:
             abort(404)
-        return EDIT_ROW_TEMPLATE.format(
-            id=row.id, precision=row.precision, log_precision=row.log_precision
-        )
+        return _render_edit_row(row)
 
     @app.get("/tables/<int:table_id>")
     def view_table(table_id: int) -> str:
@@ -366,17 +534,27 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             row = session.get(TableSpec, table_id)
         if row is None:
             abort(404)
-        return ROW_TEMPLATE.format(
-            id=row.id, precision=row.precision, log_precision=row.log_precision
-        )
+        return _render_row(row)
+
+    @app.get("/tables/<int:table_id>/table")
+    def show_generated_table(table_id: int) -> str:
+        with get_session() as session:
+            row = session.get(TableSpec, table_id)
+        if row is None:
+            abort(404)
+
+        rendered_view = _render_generated_table(row)
+        if _is_htmx_request():
+            return rendered_view
+
+        with get_session() as session:
+            rows = session.scalars(select(TableSpec).order_by(TableSpec.id)).all()
+        return _render_page(list(rows), table_view=rendered_view)
 
     @app.put("/tables/<int:table_id>")
     def update_table(table_id: int) -> str:
         try:
-            precision = _parse_positive_int(request.form.get("precision", ""), "precision")
-            log_precision = _parse_positive_int(
-                request.form.get("log_precision", ""), "log_precision"
-            )
+            fields = _parse_spec_form()
         except ValueError:
             abort(400)
 
@@ -384,8 +562,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             row = session.get(TableSpec, table_id)
             if row is None:
                 abort(404)
-            row.precision = precision
-            row.log_precision = log_precision
+            for name, value in fields.items():
+                setattr(row, name, value)
             session.commit()
             rows = session.scalars(select(TableSpec).order_by(TableSpec.id)).all()
 
