@@ -25,5 +25,6 @@
 4. [04-html-output](04-html-output/README.md)
 5. [05-local-server](05-local-server/README.md)
 6. [06-markdown-pdf](06-markdown-pdf/README.md)
+7. [07-historical-format](07-historical-format/README.md) — historical proportional log tables in the browser, N-resolution fixed decade + log precision
 
 Each phase is independently testable. Do not start a later phase until its prerequisite handoff is committed and verified.
