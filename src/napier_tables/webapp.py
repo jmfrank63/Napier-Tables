@@ -13,6 +13,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from .config import ConfigurationError, TableConfig
 from .generation import generate_table
+from .historical import (
+    HistoricalConfig,
+    HistoricalError,
+    build_historical_table,
+    render_historical_html,
+)
 from .integer_log import scaled_to_text
 
 MAX_TABLE_ROWS = 5_000
@@ -172,6 +178,11 @@ INDEX_TEMPLATE = """<!doctype html>
 
     .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
+    .card-stack {
+      display: grid;
+      gap: 20px;
+    }
+
     .table-view { margin-top: 20px; }
     .table-body { padding: 18px 20px 20px; overflow-x: auto; }
     table.log-table {
@@ -209,46 +220,74 @@ INDEX_TEMPLATE = """<!doctype html>
   <div class="shell">
     <section class="hero">
       <h1>Napier Tables</h1>
-      <p class="lede">Create and manage logarithm table configurations with a minimal htmx interface and sqlite-backed persistence.</p>
+      <p class="lede">Create modern or historical logarithm tables with integer-only arithmetic. Modern tables are saved to sqlite; historical tables are generated on the fly.</p>
     </section>
 
     <div class="grid">
-      <section class="card">
-        <header>
-          <h2>Create a table</h2>
-          <p>Choose the base, input range, and precision for a saved configuration.</p>
-        </header>
-        <form id="create-form" class="form-body" method="post" action="/tables" hx-post="/tables" hx-target="#table-list" hx-swap="outerHTML">
-          <div class="fields">
-            <div class="field">
-              <label for="base">Base</label>
-              <input id="base" name="base" type="number" min="2" step="1" value="10" required>
-            </div>
-            <div class="field-pair">
+      <div class="card-stack">
+        <section class="card">
+          <header>
+            <h2>Modern table</h2>
+            <p>Choose the base, range, and decimal places for a saved configuration.</p>
+          </header>
+          <form id="create-form" class="form-body" method="post" action="/tables" hx-post="/tables" hx-target="#table-list" hx-swap="outerHTML">
+            <div class="fields">
               <div class="field">
-                <label for="start">Start</label>
-                <input id="start" name="start" type="number" min="1" step="1" value="1" required>
+                <label for="base">Base</label>
+                <input id="base" name="base" type="number" min="2" step="1" value="10" required>
+              </div>
+              <div class="field-pair">
+                <div class="field">
+                  <label for="start">Start</label>
+                  <input id="start" name="start" type="number" min="1" step="1" value="1" required>
+                </div>
+                <div class="field">
+                  <label for="end">End</label>
+                  <input id="end" name="end" type="number" min="1" step="1" value="100" required>
+                </div>
               </div>
               <div class="field">
-                <label for="end">End</label>
-                <input id="end" name="end" type="number" min="1" step="1" value="100" required>
+                <label for="log_precision">Decimal places</label>
+                <input id="log_precision" name="log_precision" type="number" min="1" step="1" value="4" required>
               </div>
             </div>
-            <div class="field">
-              <label for="precision">Precision</label>
-              <input id="precision" name="precision" type="number" min="1" step="1" value="2" required>
+            <div class="actions">
+              <button class="button" type="submit">Save table</button>
+              <span class="notice">Stored in sqlite3 through SQLAlchemy.</span>
             </div>
-            <div class="field">
-              <label for="log_precision">Log precision</label>
-              <input id="log_precision" name="log_precision" type="number" min="1" step="1" value="4" required>
+          </form>
+        </section>
+
+        <section class="card">
+          <header>
+            <h2>Historical Bragg table</h2>
+            <p>1950s proportional layout: argument rows with 10 mantissa sub-columns per row. Fixed decade from N resolution.</p>
+          </header>
+          <form id="historical-form" class="form-body" method="post" action="/historical" hx-post="/historical" hx-target="#table-view" hx-swap="outerHTML">
+            <div class="fields">
+              <div class="field">
+                <label for="hist-base">Base</label>
+                <input id="hist-base" name="base" type="number" min="2" step="1" value="10" required>
+              </div>
+              <div class="field-pair">
+                <div class="field">
+                  <label for="resolution">N resolution</label>
+                  <input id="resolution" name="resolution" type="number" min="0" step="1" value="0" required>
+                  <span class="notice">0 → 1–9 · 1 → 10–99 · 2 → 100–999</span>
+                </div>
+                <div class="field">
+                  <label for="hist-log_precision">Log precision</label>
+                  <input id="hist-log_precision" name="log_precision" type="number" min="1" step="1" value="4" required>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="actions">
-            <button class="button" type="submit">Save table</button>
-            <span class="notice">Stored in sqlite3 through SQLAlchemy.</span>
-          </div>
-        </form>
-      </section>
+            <div class="actions">
+              <button class="button" type="submit">Generate table</button>
+              <span class="notice">Rendered on the fly, not saved.</span>
+            </div>
+          </form>
+        </section>
+      </div>
 
       {{ table_list|safe }}
     </div>
@@ -300,6 +339,39 @@ EMPTY_TABLE_VIEW = TABLE_VIEW_TEMPLATE.format(
     content='<div class="empty">No table is being shown yet.</div>',
 )
 
+EDIT_ROW_TEMPLATE = \"\"\"<article class=\"item\" data-table-id=\"{id}\">
+  <form hx-put=\"/tables/{id}\" hx-target=\"#table-list\" hx-swap=\"outerHTML\">
+    <div class=\"item-title\">
+      <strong>Editing table {id}</strong>
+      <span class=\"meta\">SQLite record #{id}</span>
+    </div>
+    <div class=\"fields\">
+      <div class=\"field\">
+        <label for=\"base-{id}\">Base</label>
+        <input id=\"base-{id}\" name=\"base\" type=\"number\" min=\"2\" step=\"1\" value=\"{base}\" required>
+      </div>
+      <div class=\"field-pair\">
+        <div class=\"field\">
+          <label for=\"start-{id}\">Start</label>
+          <input id=\"start-{id}\" name=\"start\" type=\"number\" min=\"1\" step=\"1\" value=\"{start}\" required>
+        </div>
+        <div class=\"field\">
+          <label for=\"end-{id}\">End</label>
+          <input id=\"end-{id}\" name=\"end\" type=\"number\" min=\"1\" step=\"1\" value=\"{end}\" required>
+        </div>
+      </div>
+      <div class=\"field\">
+        <label for=\"log_precision-{id}\">Decimal places</label>
+        <input id=\"log_precision-{id}\" name=\"log_precision\" type=\"number\" min=\"1\" step=\"1\" value=\"{log_precision}\" required>
+      </div>
+    </div>
+    <div class=\"item-actions\">
+      <button class=\"button\" type=\"submit\">Update</button>
+      <button class=\"link-button\" hx-get=\"/tables/{id}\" hx-target=\"[data-table-id='{id}']\" hx-swap=\"outerHTML\">Cancel</button>
+    </div>
+  </form>
+</article>
+\"\"\"
 EDIT_ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
   <form hx-put="/tables/{id}" hx-target="#table-list" hx-swap="outerHTML">
     <div class="item-title">

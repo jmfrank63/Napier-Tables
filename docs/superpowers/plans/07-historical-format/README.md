@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Every task is tests-first and ends with a focused test and commit.
 
+> **Naming note:** despite the directory name, this phase covers the *1950s school-table* layout only. The seventeenth/eighteenth-century period format — the core presentation deliverable of the project — is Phase 8 (`08-period-format`).
+
 **Goal:** Render logarithm tables in the historical proportional layout used by printed 1950s-era log tables (see `https://undergroundmathematics.org/exp-and-log/calculators1950/assets/logtables.pdf`), served and viewed in the browser, where the user chooses the **N resolution** (which fixes the table decade) and the **log precision**.
 
 **Architecture:** A new historical-format renderer consumes the existing integer-only `LogTable` rows and reshapes them into the proportional sub-column layout. It runs inside the existing Flask + htmx `webapp.py` browser surface; no new calculation engine or floating point is introduced. Range selection is derived from N resolution and is always a fixed decade (`1–10`, `10–100`, `100–1000`, …) with the upper bound excluded.
