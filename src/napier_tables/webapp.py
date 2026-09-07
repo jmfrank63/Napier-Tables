@@ -179,6 +179,22 @@ BOOK_CSS = """
     }
     .book { animation: book-appear 260ms ease; }
 
+    .zoom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+    .zoom-bar .link-button { padding: 6px 14px; }
+    .zoom-level {
+      min-width: 52px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+
     .book-toolbar {
       display: flex;
       justify-content: space-between;
@@ -220,6 +236,7 @@ BOOK_CSS = """
         linear-gradient(180deg, #fffdf8, #faf3e6);
       box-shadow: 0 16px 40px rgba(85, 58, 31, 0.14);
     }
+    .book-spread:not(.two) .book-page { max-width: 640px; margin: 0 auto; }
     .book-spread.two .book-page { border: 0; border-radius: 0; box-shadow: none; }
     .book-spread.two .book-page:first-child {
       border-radius: 14px 0 0 14px;
@@ -246,10 +263,12 @@ BOOK_CSS = """
 
     .log-table {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
       font-size: 0.88rem;
     }
+    .log-table thead th:first-child { text-align: right; }
     .log-table th,
     .log-table td {
       border: 1px solid rgba(215, 200, 180, 0.7);
@@ -413,8 +432,60 @@ BOOK_TEMPLATE = """<!doctype html>
 </head>
 <body>
   <main class="book-shell">
+    <div class="zoom-bar" id="zoom-bar">
+      <button class="link-button" id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <span class="zoom-level" id="zoom-level">100%</span>
+      <button class="link-button" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button class="link-button" id="zoom-fit" type="button">Fit page</button>
+    </div>
     {{ book|safe }}
   </main>
+  <script>
+    (function () {
+      var MIN_ZOOM = 0.3;
+      var MAX_ZOOM = 2.5;
+      var zoom = 1;
+
+      function spread() {
+        return document.querySelector('.book-spread');
+      }
+
+      function apply() {
+        var element = spread();
+        if (!element) return;
+        element.style.zoom = zoom;
+        document.getElementById('zoom-level').textContent = Math.round(zoom * 100) + '%';
+      }
+
+      function fit() {
+        var element = spread();
+        if (!element) return;
+        element.style.zoom = 1;
+        var width = element.offsetWidth;
+        var height = element.offsetHeight;
+        var top = element.getBoundingClientRect().top;
+        var controls = document.querySelector('.book-controls');
+        var chrome = (controls ? controls.offsetHeight : 0) + 56;
+        var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
+        var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
+        zoom = Math.min(availableWidth / width, availableHeight / height, 1.5);
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+        apply();
+      }
+
+      function step(factor) {
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+        apply();
+      }
+
+      document.getElementById('zoom-out').addEventListener('click', function () { step(1 / 1.2); });
+      document.getElementById('zoom-in').addEventListener('click', function () { step(1.2); });
+      document.getElementById('zoom-fit').addEventListener('click', fit);
+      window.addEventListener('resize', fit);
+      document.body.addEventListener('htmx:afterSwap', apply);
+      fit();
+    })();
+  </script>
 </body>
 </html>
 """

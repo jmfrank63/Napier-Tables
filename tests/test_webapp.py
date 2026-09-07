@@ -285,3 +285,19 @@ def test_value_jump_respects_table_precision(client):
 
     assert "Page 57 of 450: 2.1200 to 2.1399" in body
     assert '<tr class="located"><th>2121</th>' in body
+
+
+def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read").get_data(as_text=True)
+
+    assert 'id="zoom-bar"' in body
+    assert 'id="zoom-level"' in body
+    assert "Fit page" in body
+    assert "table-layout: fixed" in body
+    assert ".book-spread:not(.two) .book-page" in body
