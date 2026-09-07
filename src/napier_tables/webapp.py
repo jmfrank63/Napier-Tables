@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -10,15 +11,10 @@ from flask import Flask, abort, render_template_string, request
 from sqlalchemy import Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from .integer_log import log10_scaled, round_ratio, scaled_to_text
 
-INDEX_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Napier Tables</title>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <style>
+
+BASE_CSS = """
     :root {
       color-scheme: light;
       --bg: #f4f1ea;
@@ -160,19 +156,168 @@ INDEX_TEMPLATE = """<!doctype html>
       font-weight: 700;
       cursor: pointer;
     }
+    .link-button:disabled { opacity: 0.4; cursor: default; }
 
     .notice { color: var(--muted); font-size: 0.92rem; }
 
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
     }
+"""
+
+BOOK_CSS = """
+    .book-shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 36px 20px 60px;
+    }
+
+    .book { display: grid; gap: 18px; }
+    @keyframes book-appear {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    .book { animation: book-appear 260ms ease; }
+
+    .book-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+    .book-toolbar strong { font-size: 1.15rem; }
+
+    .book-spread { display: grid; gap: 24px; }
+    .book-spread.two {
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      position: relative;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #fffdf8, #faf3e6);
+      box-shadow: 0 26px 60px rgba(85, 58, 31, 0.2);
+    }
+    .book-spread.two::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      transform: translateX(-50%);
+      z-index: 1;
+      background:
+        linear-gradient(90deg, rgba(124, 77, 43, 0.05), rgba(124, 77, 43, 0.35), rgba(124, 77, 43, 0.05));
+      border-radius: 2px;
+    }
+
+    .book-page {
+      padding: 22px 20px 26px;
+      border: 1px solid var(--border);
+      border-radius: 4px 14px 14px 4px;
+      background:
+        linear-gradient(90deg, rgba(200, 154, 108, 0.1), transparent 26px),
+        linear-gradient(180deg, #fffdf8, #faf3e6);
+      box-shadow: 0 16px 40px rgba(85, 58, 31, 0.14);
+    }
+    .book-spread.two .book-page { border: 0; border-radius: 0; box-shadow: none; }
+    .book-spread.two .book-page:first-child {
+      border-radius: 14px 0 0 14px;
+      background:
+        linear-gradient(90deg, rgba(200, 154, 108, 0.12), transparent 30px),
+        linear-gradient(270deg, rgba(124, 77, 43, 0.16), transparent 48px),
+        linear-gradient(180deg, #fffdf8, #faf3e6);
+    }
+    .book-spread.two .book-page:last-child {
+      border-radius: 0 14px 14px 0;
+      background:
+        linear-gradient(270deg, rgba(200, 154, 108, 0.12), transparent 30px),
+        linear-gradient(90deg, rgba(124, 77, 43, 0.16), transparent 48px),
+        linear-gradient(180deg, #fffdf8, #faf3e6);
+    }
+    .book-page h3 {
+      margin: 0 0 14px;
+      text-align: center;
+      font-weight: 400;
+      font-style: italic;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+
+    .log-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.88rem;
+    }
+    .log-table th,
+    .log-table td {
+      border: 1px solid rgba(215, 200, 180, 0.7);
+      padding: 6px 8px;
+      text-align: right;
+    }
+    .log-table thead th {
+      background: rgba(124, 77, 43, 0.08);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+    .log-table tbody th {
+      background: rgba(124, 77, 43, 0.05);
+      font-weight: 700;
+    }
+    .log-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.5); }
+    .log-table tr.located th,
+    .log-table tr.located td { background: rgba(200, 154, 108, 0.28); }
+
+    .book-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .book-controls .home-link { margin-right: auto; }
+    .controls-spacer { margin-left: auto; width: 92px; }
+
+    .jump-form { display: flex; align-items: center; gap: 6px; }
+    .jump-form label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .jump-form input {
+      width: 96px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+    .jump-form input:focus { outline: 2px solid rgba(124, 77, 43, 0.25); outline-offset: 1px; }
+
+    @media (max-width: 720px) {
+      .book-spread.two { grid-template-columns: 1fr; }
+      .book-spread.two::after { display: none; }
+      .book-spread.two .book-page { border-radius: 14px; }
+    }
+"""
+
+INDEX_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Napier Tables</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+{{ base_css }}
   </style>
 </head>
 <body>
   <div class="shell">
     <section class="hero">
       <h1>Napier Tables</h1>
-      <p class="lede">Create and manage logarithm table configurations with a minimal htmx interface and sqlite-backed persistence.</p>
+      <p class="lede">Create logarithm table configurations and read each one as a paginated book, one sheet or a two-page spread at a time.</p>
     </section>
 
     <div class="grid">
@@ -209,7 +354,7 @@ INDEX_TEMPLATE = """<!doctype html>
 TABLE_LIST_TEMPLATE = """<section id="table-list" class="card list-box">
   <div class="list-head">
     <h2>Created tables</h2>
-    <p>Use edit and delete actions directly in the list.</p>
+    <p>Open a table to read it page by page; edit and delete actions are inline.</p>
   </div>
   <div class="items">
     {content}
@@ -223,6 +368,7 @@ ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
     <span class="meta">Precision {precision} · Log precision {log_precision}</span>
   </div>
   <div class="item-actions">
+    <a class="link-button" href="/tables/{id}/read">Read</a>
     <button class="link-button" hx-get="/tables/{id}/edit" hx-target="[data-table-id='{id}']" hx-swap="outerHTML">Edit</button>
     <button class="link-button" hx-delete="/tables/{id}" hx-target="#table-list" hx-swap="outerHTML" hx-confirm="Delete this table?">Delete</button>
   </div>
@@ -253,6 +399,74 @@ EDIT_ROW_TEMPLATE = """<article class="item" data-table-id="{id}">
 </article>
 """
 
+BOOK_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Napier Tables · Reader</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+{{ base_css }}
+{{ book_css }}
+  </style>
+</head>
+<body>
+  <main class="book-shell">
+    {{ book|safe }}
+  </main>
+</body>
+</html>
+"""
+
+BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}">
+  <div class="book-toolbar">
+    <div>
+      <strong>Table {id}</strong>
+      <span class="meta">Precision {precision} · Log precision {log_precision}</span>
+    </div>
+    <span class="meta">{pages_label}</span>
+  </div>
+  <div class="book-spread{spread_class}">
+    {pages}
+  </div>
+  <div class="book-controls">
+    <a class="link-button home-link" href="/">All tables</a>
+    <button class="link-button" {back_disabled} hx-get="{back_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">◀ Back</button>
+    <form class="jump-form" hx-get="{reader_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">
+      <label for="jump-page-{id}">Page</label>
+      <input id="jump-page-{id}" name="page" type="number" min="1" max="{total_pages}" placeholder="{page_placeholder}">
+      <input type="hidden" name="spread" value="{spread_value}">
+      <button class="link-button" type="submit">Go</button>
+    </form>
+    <form class="jump-form" hx-get="{reader_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">
+      <label for="jump-value-{id}">Value</label>
+      <input id="jump-value-{id}" name="value" type="text" inputmode="decimal" placeholder="{value_placeholder}">
+      <input type="hidden" name="spread" value="{spread_value}">
+      <button class="link-button" type="submit">Go</button>
+    </form>
+    <button class="link-button" hx-get="{toggle_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">{toggle_label}</button>
+    <button class="link-button" {forward_disabled} hx-get="{forward_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">Forward ▶</button>
+    <span class="controls-spacer"></span>
+  </div>
+</div>
+"""
+
+BOOK_PAGE_TEMPLATE = """<section class="book-page">
+  <h3>Page {page} of {total}: {start} to {end}</h3>
+  <table class="log-table">
+    <thead>
+      <tr><th>N</th>{column_heads}</tr>
+    </thead>
+    <tbody>
+      {rows}
+    </tbody>
+  </table>
+</section>"""
+
+
+ROWS_PER_BOOK_PAGE = 20
+
 
 class Base(DeclarativeBase):
     pass
@@ -282,7 +496,123 @@ def _render_table_list(rows: list[TableSpec]) -> str:
 
 
 def _render_page(rows: list[TableSpec]) -> str:
-    return render_template_string(INDEX_TEMPLATE, table_list=_render_table_list(rows))
+    return render_template_string(
+        INDEX_TEMPLATE, table_list=_render_table_list(rows), base_css=BASE_CSS
+    )
+
+
+def _book_page_count(precision: int) -> int:
+    total_rows = 9 * 10 ** (precision - 1)
+    return -(-total_rows // ROWS_PER_BOOK_PAGE)
+
+
+def _locate_value(raw: str, precision: int) -> int:
+    """Snap a decimal string such as ``"2.1212"`` onto the nearest table value."""
+    try:
+        value = Fraction(raw)
+    except (ValueError, ZeroDivisionError) as exc:
+        raise ValueError(f"invalid value: {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"value must be positive: {raw!r}")
+
+    scaled = round_ratio(value.numerator * 10**precision, value.denominator, 1)
+    return min(max(scaled, 10**precision), 10 ** (precision + 1) - 1)
+
+
+def _page_for_value(scaled_value: int, precision: int) -> int:
+    row_index = (scaled_value - 10**precision) // 10
+    return row_index // ROWS_PER_BOOK_PAGE + 1
+
+
+def _render_book_page(
+    spec: TableSpec, page_number: int, total_pages: int, highlight_row: int | None = None
+) -> str:
+    first_value = 10**spec.precision + (page_number - 1) * ROWS_PER_BOOK_PAGE * 10
+    last_value = min(
+        first_value + ROWS_PER_BOOK_PAGE * 10 - 1, 10 ** (spec.precision + 1) - 1
+    )
+    column_heads = "".join(f"<th>{column}</th>" for column in range(10))
+    body_rows = []
+    for row_start in range(first_value, last_value + 1, 10):
+        row_class = (
+            ' class="located"'
+            if highlight_row is not None and row_start // 10 == highlight_row
+            else ""
+        )
+        cells = [f"<th>{row_start // 10}</th>"]
+        for column in range(10):
+            scaled = log10_scaled(
+                row_start + column, spec.precision, spec.log_precision
+            )
+            cells.append(f"<td>{scaled_to_text(scaled, spec.log_precision)}</td>")
+        body_rows.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
+    return BOOK_PAGE_TEMPLATE.format(
+        page=page_number,
+        total=total_pages,
+        start=scaled_to_text(first_value, spec.precision),
+        end=scaled_to_text(last_value, spec.precision),
+        column_heads=column_heads,
+        rows="\n      ".join(body_rows),
+    )
+
+
+def _render_book(
+    spec: TableSpec, page: int, spread: bool, highlight_value: int | None = None
+) -> str:
+    total_pages = _book_page_count(spec.precision)
+    reader_url = f"/tables/{spec.id}/read"
+    highlight_row = highlight_value // 10 if highlight_value is not None else None
+
+    if spread:
+        last_left = total_pages if total_pages % 2 == 1 else total_pages - 1
+        page = min(max(page if page % 2 == 1 else page - 1, 1), max(last_left, 1))
+        shown = [number for number in (page, page + 1) if number <= total_pages]
+        back_page = max(1, page - 2)
+        forward_page = min(page + 2, last_left)
+        toggle_page = page
+        toggle_spread = 0
+        toggle_label = "One page"
+        spread_class = " two"
+    else:
+        page = min(max(page, 1), total_pages)
+        shown = [page]
+        back_page = max(1, page - 1)
+        forward_page = min(page + 1, total_pages)
+        toggle_page = max(1, page if page % 2 == 1 else page - 1)
+        toggle_spread = 1
+        toggle_label = "Two pages"
+        spread_class = ""
+
+    pages_html = "\n".join(
+        _render_book_page(spec, number, total_pages, highlight_row) for number in shown
+    )
+    if len(shown) > 1:
+        pages_label = f"Pages {shown[0]}–{shown[-1]} of {total_pages}"
+    else:
+        pages_label = f"Page {shown[0]} of {total_pages}"
+
+    first_shown_value = 10**spec.precision + (shown[0] - 1) * ROWS_PER_BOOK_PAGE * 10
+    value_placeholder = scaled_to_text(first_shown_value, spec.precision)
+
+    return BOOK_FRAGMENT_TEMPLATE.format(
+        id=spec.id,
+        precision=spec.precision,
+        log_precision=spec.log_precision,
+        pages_label=pages_label,
+        pages=pages_html,
+        spread_class=spread_class,
+        reader_url=reader_url,
+        total_pages=total_pages,
+        page_placeholder=page,
+        value_placeholder=value_placeholder,
+        spread_value=int(spread),
+        back_url=f"{reader_url}?page={back_page}&spread={int(spread)}",
+        back_disabled="disabled" if back_page == page else "",
+        forward_url=f"{reader_url}?page={forward_page}&spread={int(spread)}",
+        forward_disabled="disabled" if forward_page == page else "",
+        toggle_url=f"{reader_url}?page={toggle_page}&spread={toggle_spread}",
+        toggle_label=toggle_label,
+    )
 
 
 def _parse_positive_int(value: str, field_name: str) -> int:
@@ -368,6 +698,38 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             abort(404)
         return ROW_TEMPLATE.format(
             id=row.id, precision=row.precision, log_precision=row.log_precision
+        )
+
+    @app.get("/tables/<int:table_id>/read")
+    def read_table(table_id: int) -> str:
+        with get_session() as session:
+            row = session.get(TableSpec, table_id)
+        if row is None:
+            abort(404)
+
+        spread = request.args.get("spread", "0") == "1"
+        try:
+            page = int(request.args.get("page", "1"))
+        except ValueError:
+            abort(400)
+
+        raw_value = request.args.get("value", "").strip()
+        highlight_value = None
+        if raw_value:
+            try:
+                highlight_value = _locate_value(raw_value, row.precision)
+            except ValueError:
+                abort(400)
+            page = _page_for_value(highlight_value, row.precision)
+
+        fragment = _render_book(row, page, spread, highlight_value)
+        if _is_htmx_request():
+            return fragment
+        return render_template_string(
+            BOOK_TEMPLATE,
+            base_css=BASE_CSS,
+            book_css=BOOK_CSS,
+            book=fragment,
         )
 
     @app.put("/tables/<int:table_id>")

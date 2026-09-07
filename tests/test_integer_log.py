@@ -1,9 +1,16 @@
+import math
+
 from fractions import Fraction
 
 import pytest
 
 from napier_tables import integer_log
-from napier_tables.integer_log import CalculationError, round_ratio, scaled_to_text
+from napier_tables.integer_log import (
+    CalculationError,
+    log10_scaled,
+    round_ratio,
+    scaled_to_text,
+)
 
 
 def test_round_ratio_rounds_thirds_to_nearest_scaled_integer():
@@ -114,3 +121,56 @@ def test_atanh_bounds_enclose_ln_three_halves_after_one_term():
 
     assert 2 * lower == Fraction(2, 5)
     assert 2 * upper == Fraction(73, 180)
+
+
+@pytest.mark.parametrize(
+    ("scaled_value", "value_digits", "fractional_digits"),
+    [
+        (100, 2, 4),
+        (101, 2, 4),
+        (123, 2, 4),
+        (150, 2, 4),
+        (199, 2, 4),
+        (200, 2, 4),
+        (999, 2, 4),
+        (1234, 3, 5),
+        (1234, 3, 6),
+        (10, 1, 3),
+        (500, 2, 6),
+    ],
+)
+def test_log10_scaled_matches_floating_point_reference(
+    scaled_value, value_digits, fractional_digits
+):
+    scaled = log10_scaled(scaled_value, value_digits, fractional_digits)
+    expected = math.log10(scaled_value / 10**value_digits)
+
+    assert scaled >= 0
+    assert abs(scaled / 10**fractional_digits - expected) < (
+        0.5 * 10**-fractional_digits + 1e-12
+    )
+
+
+def test_log10_scaled_is_exact_for_powers_of_ten():
+    assert log10_scaled(100, 2, 4) == 0
+    assert log10_scaled(1000, 3, 4) == 0
+    assert log10_scaled(100_000, 4, 4) == 10_000
+
+
+def test_log10_scaled_agrees_with_published_classic_table():
+    assert scaled_to_text(log10_scaled(101, 2, 4), 4) == "0.0043"
+    assert scaled_to_text(log10_scaled(150, 2, 4), 4) == "0.1761"
+    assert scaled_to_text(log10_scaled(200, 2, 4), 4) == "0.3010"
+    assert scaled_to_text(log10_scaled(199, 2, 4), 4) == "0.2989"
+    assert scaled_to_text(log10_scaled(999, 2, 4), 4) == "0.9996"
+
+
+@pytest.mark.parametrize("scaled_value", [0, -5])
+def test_log10_scaled_rejects_non_positive_values(scaled_value):
+    with pytest.raises(CalculationError, match="^scaled_value must be positive$"):
+        log10_scaled(scaled_value, 2, 4)
+
+
+def test_log10_scaled_rejects_negative_value_digits():
+    with pytest.raises(CalculationError, match="^value_digits must be non-negative$"):
+        log10_scaled(100, -1, 4)

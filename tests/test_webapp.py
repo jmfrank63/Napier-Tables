@@ -94,3 +94,194 @@ def test_invalid_input_is_rejected_before_database_access(client, app):
         }
 
     assert "table_specs" in tables
+
+
+def test_read_page_renders_first_book_page_with_log_values(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    response = client.get("/tables/1/read")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Page 1 of 5: 1.00 to 2.99" in body
+    assert "0.0000" in body
+    assert "0.0043" in body
+    assert "0.3010" in body
+    assert "◀ Back" in body
+    assert "Forward ▶" in body
+    assert "Two pages" in body
+
+
+def test_read_page_clamps_out_of_range_pages_to_the_boundaries(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    second = client.get("/tables/1/read?page=2").get_data(as_text=True)
+    assert "Page 2 of 5: 3.00 to 4.99" in second
+
+    last = client.get("/tables/1/read?page=999").get_data(as_text=True)
+    assert "Page 5 of 5: 9.00 to 9.99" in last
+
+    first = client.get("/tables/1/read?page=0").get_data(as_text=True)
+    assert "Page 1 of 5: 1.00 to 2.99" in first
+
+
+def test_read_page_two_page_spread_shows_both_sheets(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    response = client.get("/tables/1/read?page=1&spread=1")
+
+    body = response.get_data(as_text=True)
+    assert "Pages 1–2 of 5" in body
+    assert "Page 1 of 5: 1.00 to 2.99" in body
+    assert "Page 2 of 5: 3.00 to 4.99" in body
+    assert "One page" in body
+
+
+def test_read_page_htmx_request_returns_fragment_only(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    response = client.get("/tables/1/read?page=1", headers={"HX-Request": "true"})
+
+    body = response.get_data(as_text=True)
+    assert "<!doctype html>" not in body.lower()
+    assert 'id="book"' in body
+
+
+def test_read_page_rejects_non_integer_page_number(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert client.get("/tables/1/read?page=oops").status_code == 400
+
+
+def test_read_page_unknown_table_returns_404(client):
+    assert client.get("/tables/7/read").status_code == 404
+
+
+def test_table_list_links_to_the_reader(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/").get_data(as_text=True)
+
+    assert 'href="/tables/1/read"' in body
+
+
+def test_reader_offers_page_and_value_jump_forms(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read").get_data(as_text=True)
+
+    assert 'name="page"' in body
+    assert 'name="value"' in body
+    assert "Go</button>" in body
+
+
+def test_value_jump_lands_on_page_and_highlights_row(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    response = client.get("/tables/1/read?value=4.5")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Page 2 of 5: 3.00 to 4.99" in body
+    assert '<tr class="located"><th>45</th>' in body
+    assert "0.6532" in body
+
+
+def test_value_jump_in_spread_mode_shows_odd_even_pair(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?value=5&spread=1").get_data(as_text=True)
+
+    assert "Pages 3–4 of 5" in body
+    assert "Page 3 of 5: 5.00 to 6.99" in body
+    assert "Page 4 of 5: 7.00 to 8.99" in body
+    assert '<tr class="located"><th>50</th>' in body
+
+
+def test_value_jump_even_page_pairing_in_spread_mode(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?value=7&spread=1").get_data(as_text=True)
+
+    assert "Pages 3–4 of 5" in body
+    assert "Page 3 of 5: 5.00 to 6.99" in body
+    assert "Page 4 of 5: 7.00 to 8.99" in body
+
+
+def test_value_jump_clamps_out_of_range_values(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    below = client.get("/tables/1/read?value=0.25").get_data(as_text=True)
+    assert "Page 1 of 5: 1.00 to 2.99" in below
+
+    above = client.get("/tables/1/read?value=42").get_data(as_text=True)
+    assert "Page 5 of 5: 9.00 to 9.99" in above
+
+
+def test_value_jump_rejects_garbage_but_allows_empty(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert client.get("/tables/1/read?value=abc").status_code == 400
+    assert client.get("/tables/1/read?value=2.5.3").status_code == 400
+    assert client.get("/tables/1/read?value=").status_code == 200
+
+
+def test_value_jump_respects_table_precision(client):
+    client.post(
+        "/tables",
+        data={"precision": "4", "log_precision": "5"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?value=2.1212").get_data(as_text=True)
+
+    assert "Page 57 of 450: 2.1200 to 2.1399" in body
+    assert '<tr class="located"><th>2121</th>' in body

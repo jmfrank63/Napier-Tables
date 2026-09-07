@@ -58,6 +58,49 @@ def _reduce_ratio(numerator: int, denominator: int) -> tuple[int, int, int]:
     return reduced.numerator, reduced.denominator, exponent
 
 
+def _ln_fraction(numerator: int, denominator: int, terms: int) -> Fraction:
+    """Approximate ``ln(numerator / denominator)`` as an exact rational midpoint."""
+    if numerator <= 0:
+        raise CalculationError("numerator must be positive")
+    if denominator <= 0:
+        raise CalculationError("denominator must be positive")
+
+    reduced_numerator, reduced_denominator, exponent = _reduce_ratio(
+        numerator, denominator
+    )
+    lower, upper = _atanh_bounds(
+        reduced_numerator - reduced_denominator,
+        reduced_numerator + reduced_denominator,
+        terms,
+    )
+    ln_value = lower + upper
+    if exponent:
+        ln_two_lower, ln_two_upper = _atanh_bounds(1, 3, terms)
+        ln_value += exponent * (ln_two_lower + ln_two_upper)
+    return ln_value
+
+
+def log10_scaled(
+    scaled_value: int, value_digits: int, fractional_digits: int
+) -> int:
+    """Round ``log10(scaled_value / 10**value_digits)`` at ``10**fractional_digits``.
+
+    The input is a scaled positive value such as ``123`` with ``value_digits``
+    equal to ``2``, meaning ``1.23``. The result uses the exact atanh series
+    with rational midpoints and half-up rounding, never floating point.
+    """
+    if value_digits < 0:
+        raise CalculationError("value_digits must be non-negative")
+    if scaled_value <= 0:
+        raise CalculationError("scaled_value must be positive")
+
+    terms = fractional_digits + 16
+    ln_value = _ln_fraction(scaled_value, 10**value_digits, terms)
+    ln_ten = _ln_fraction(10, 1, terms)
+    ratio = ln_value / ln_ten
+    return round_ratio(ratio.numerator, ratio.denominator, 10**fractional_digits)
+
+
 def _atanh_bounds(
     numerator: int, denominator: int, terms: int
 ) -> tuple[Fraction, Fraction]:
