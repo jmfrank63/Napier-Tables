@@ -108,9 +108,9 @@ def test_read_page_renders_first_book_page_with_log_values(client):
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "Page 1 of 5: 1.00 to 2.99" in body
-    assert "0.0000" in body
-    assert "0.0043" in body
-    assert "0.3010" in body
+    assert "0000" in body
+    assert "0043" in body
+    assert "3010" in body
     assert "◀ Back" in body
     assert "Forward ▶" in body
     assert "Two pages" in body
@@ -216,7 +216,7 @@ def test_value_jump_lands_on_page_and_highlights_row(client):
     body = response.get_data(as_text=True)
     assert "Page 2 of 5: 3.00 to 4.99" in body
     assert '<tr class="located"><th>45</th>' in body
-    assert "0.6532" in body
+    assert "6532" in body
 
 
 def test_value_jump_in_spread_mode_shows_odd_even_pair(client):
@@ -284,7 +284,7 @@ def test_value_jump_respects_table_precision(client):
     body = client.get("/tables/1/read?value=2.1212").get_data(as_text=True)
 
     assert "Page 57 of 450: 2.1200 to 2.1399" in body
-    assert '<tr class="located"><th>2121</th>' in body
+    assert '<tr class="located"><th>1</th>' in body
 
 
 def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
@@ -301,3 +301,37 @@ def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
     assert "Fit page" in body
     assert "table-layout: fixed" in body
     assert ".book-spread:not(.two) .book-page" in body
+
+
+def test_entries_print_bare_mantissas_without_leading_zero(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read").get_data(as_text=True)
+
+    assert "Each entry gives the digits only" in body
+    assert ">0000</td>" in body
+    assert ">3010</td>" in body
+    assert ">9996</td>" not in body
+
+
+def test_row_labels_show_full_number_every_five_rows_only(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read").get_data(as_text=True)
+
+    assert "<th>10</th>" in body
+    assert "<th>15</th>" in body
+    assert "<th>20</th>" in body
+    assert "<th>25</th>" in body
+    assert "<th>11</th>" not in body
+    assert "<th>16</th>" not in body
+    assert "<th>1</th>" in body
+    assert "<th>6</th>" in body

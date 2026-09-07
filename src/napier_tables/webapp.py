@@ -253,11 +253,18 @@ BOOK_CSS = """
         linear-gradient(180deg, #fffdf8, #faf3e6);
     }
     .book-page h3 {
-      margin: 0 0 14px;
+      margin: 0 0 2px;
       text-align: center;
       font-weight: 400;
       font-style: italic;
       font-size: 0.95rem;
+      color: var(--muted);
+    }
+    .legend {
+      margin: 0 0 10px;
+      text-align: center;
+      font-size: 0.78rem;
+      font-style: italic;
       color: var(--muted);
     }
 
@@ -272,7 +279,7 @@ BOOK_CSS = """
     .log-table th,
     .log-table td {
       border: 1px solid rgba(215, 200, 180, 0.7);
-      padding: 6px 8px;
+      padding: 3px 6px;
       text-align: right;
     }
     .log-table thead th {
@@ -285,6 +292,10 @@ BOOK_CSS = """
       font-weight: 700;
     }
     .log-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.5); }
+    .log-table tbody tr:nth-child(5n) th,
+    .log-table tbody tr:nth-child(5n) td {
+      border-bottom: 2px solid rgba(124, 77, 43, 0.45);
+    }
     .log-table tr.located th,
     .log-table tr.located td { background: rgba(200, 154, 108, 0.28); }
 
@@ -525,6 +536,7 @@ BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}">
 
 BOOK_PAGE_TEMPLATE = """<section class="book-page">
   <h3>Page {page} of {total}: {start} to {end}</h3>
+  <p class="legend">Each entry gives the digits only — 3010 reads 0.3010.</p>
   <table class="log-table">
     <thead>
       <tr><th>N</th>{column_heads}</tr>
@@ -605,17 +617,22 @@ def _render_book_page(
     column_heads = "".join(f"<th>{column}</th>" for column in range(10))
     body_rows = []
     for row_start in range(first_value, last_value + 1, 10):
+        row_number = row_start // 10
+        if row_number % 5 == 0:
+            row_header = str(row_number)
+        else:
+            row_header = str(row_number % 10)
         row_class = (
             ' class="located"'
-            if highlight_row is not None and row_start // 10 == highlight_row
+            if highlight_row is not None and row_number == highlight_row
             else ""
         )
-        cells = [f"<th>{row_start // 10}</th>"]
+        cells = [f"<th>{row_header}</th>"]
         for column in range(10):
             scaled = log10_scaled(
                 row_start + column, spec.precision, spec.log_precision
             )
-            cells.append(f"<td>{scaled_to_text(scaled, spec.log_precision)}</td>")
+            cells.append(f"<td>{scaled:0{spec.log_precision}d}</td>")
         body_rows.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
     return BOOK_PAGE_TEMPLATE.format(
         page=page_number,
