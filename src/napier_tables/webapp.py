@@ -272,7 +272,6 @@ BOOK_CSS = """
 
     .log-table {
       width: auto;
-      table-layout: fixed;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
       font-size: 0.88rem;
@@ -382,6 +381,15 @@ INDEX_TEMPLATE = """<!doctype html>
       {{ table_list|safe }}
     </div>
   </div>
+  <script>
+    document.addEventListener("click", function (event) {
+      var link = event.target.closest("a[href*='/read']");
+      if (!link) return;
+      var url = new URL(link.href, location.href);
+      url.searchParams.set("spread", window.innerWidth > window.innerHeight ? "1" : "0");
+      link.href = url.toString();
+    }, true);
+  </script>
 </body>
 </html>
 """
@@ -459,8 +467,9 @@ BOOK_TEMPLATE = """<!doctype html>
   <script>
     (function () {
       var MIN_ZOOM = 0.3;
-      var MAX_ZOOM = 2.5;
+      var MAX_ZOOM = 3;
       var zoom = 1;
+      var pendingRefit = false;
 
       function spread() {
         return document.querySelector('.book-spread');
@@ -483,8 +492,8 @@ BOOK_TEMPLATE = """<!doctype html>
         var chrome = (controls ? controls.offsetHeight : 0) + 56;
         var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
         var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
-        zoom = Math.min(availableWidth / rect.width, availableHeight / rect.height, 1.5);
-        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+        zoom = Math.min(availableWidth / rect.width, availableHeight / rect.height, MAX_ZOOM);
+        zoom = Math.max(MIN_ZOOM, zoom);
         apply();
       }
 
@@ -493,12 +502,57 @@ BOOK_TEMPLATE = """<!doctype html>
         apply();
       }
 
+      function viewIsSpread() {
+        var element = spread();
+        return Boolean(element && element.classList.contains('two'));
+      }
+
+      function wantsSpread() {
+        return window.innerWidth > window.innerHeight;
+      }
+
+      function syncView() {
+        if (document.body.dataset.manualView) return;
+        if (viewIsSpread() === wantsSpread()) return;
+        var label = wantsSpread() ? 'Two pages' : 'One page';
+        var buttons = document.querySelectorAll('.book-controls button');
+        for (var index = 0; index < buttons.length; index++) {
+          if (buttons[index].textContent.trim() === label) {
+            pendingRefit = true;
+            buttons[index].click();
+            return;
+          }
+        }
+      }
+
       document.getElementById('zoom-out').addEventListener('click', function () { step(1 / 1.2); });
       document.getElementById('zoom-in').addEventListener('click', function () { step(1.2); });
       document.getElementById('zoom-fit').addEventListener('click', fit);
-      window.addEventListener('resize', fit);
-      document.body.addEventListener('htmx:afterSwap', apply);
+      document.body.addEventListener('click', function (event) {
+        var button = event.target.closest('.book-controls button');
+        var viewLabels = { 'One page': true, 'Two pages': true };
+        if (event.isTrusted && button && viewLabels[button.textContent.trim()]) {
+          document.body.dataset.manualView = '1';
+        }
+      }, true);
+      document.body.addEventListener('htmx:afterSwap', function () {
+        if (pendingRefit) {
+          pendingRefit = false;
+          fit();
+        } else {
+          apply();
+        }
+      });
+      window.addEventListener('resize', function () {
+        fit();
+        syncView();
+      });
       fit();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', syncView);
+      } else {
+        syncView();
+      }
     })();
   </script>
 </body>

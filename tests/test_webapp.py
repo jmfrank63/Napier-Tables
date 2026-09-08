@@ -30,6 +30,7 @@ def test_start_page_renders_htmx_form_and_empty_list(client):
     assert 'name="precision"' in body
     assert 'name="log_precision"' in body
     assert "No tables have been created yet." in body
+    assert "window.innerWidth > window.innerHeight" in body
 
 
 def test_crud_round_trip_persists_records_in_sqlite(client, app):
@@ -299,8 +300,9 @@ def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
     assert 'id="zoom-bar"' in body
     assert 'id="zoom-level"' in body
     assert "Fit page" in body
-    assert "table-layout: fixed" in body
-    assert ".book-spread:not(.two) .book-page" in body
+    assert "repeat(2, max-content)" in body
+    assert "width: auto" in body
+    assert "window.innerWidth > window.innerHeight" in body
 
 
 def test_entries_print_bare_mantissas_without_leading_zero(client):
