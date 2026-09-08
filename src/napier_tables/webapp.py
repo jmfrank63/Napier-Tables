@@ -507,14 +507,41 @@ BOOK_TEMPLATE = """<!doctype html>
         return Boolean(element && element.classList.contains('two'));
       }
 
-      function wantsSpread() {
-        return window.innerWidth > window.innerHeight;
-      }
-
       function syncView() {
         if (document.body.dataset.manualView) return;
-        if (viewIsSpread() === wantsSpread()) return;
-        var label = wantsSpread() ? 'Two pages' : 'One page';
+        var element = spread();
+        if (!element) return;
+        var page = element.querySelector('.book-page');
+        if (!page) return;
+        var previous = element.style.zoom;
+        element.style.zoom = 1;
+        var pageRect = page.getBoundingClientRect();
+        var top = element.getBoundingClientRect().top;
+        element.style.zoom = previous;
+        var controls = document.querySelector('.book-controls');
+        var chrome = (controls ? controls.offsetHeight : 0) + 56;
+        var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
+        var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
+        var singleScale = Math.min(
+          availableWidth / pageRect.width,
+          availableHeight / pageRect.height,
+          MAX_ZOOM
+        );
+        var spreadScale = Math.min(
+          availableWidth / (pageRect.width * 2 + 4),
+          availableHeight / pageRect.height,
+          MAX_ZOOM
+        );
+        var wantSpread;
+        if (singleScale <= 1 !== spreadScale <= 1) {
+          wantSpread = spreadScale <= 1;
+        } else if (singleScale === spreadScale) {
+          wantSpread = window.innerWidth > window.innerHeight;
+        } else {
+          wantSpread = spreadScale > singleScale;
+        }
+        if (viewIsSpread() === wantSpread) return;
+        var label = wantSpread ? 'Two pages' : 'One page';
         var buttons = document.querySelectorAll('.book-controls button');
         for (var index = 0; index < buttons.length; index++) {
           if (buttons[index].textContent.trim() === label) {

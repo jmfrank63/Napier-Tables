@@ -302,6 +302,8 @@ def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
     assert "Fit page" in body
     assert "repeat(2, max-content)" in body
     assert "width: auto" in body
+    assert "singleScale" in body
+    assert "spreadScale" in body
     assert "window.innerWidth > window.innerHeight" in body
 
 
