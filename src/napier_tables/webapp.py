@@ -206,7 +206,8 @@ BOOK_CSS = """
 
     .book-spread { display: grid; gap: 24px; }
     .book-spread.two {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(2, max-content);
+      justify-content: center;
       gap: 0;
       position: relative;
       border-radius: 6px;
@@ -228,6 +229,7 @@ BOOK_CSS = """
     }
 
     .book-page {
+      width: max-content;
       padding: 22px 20px 26px;
       border: 1px solid var(--border);
       border-radius: 4px 14px 14px 4px;
@@ -236,7 +238,7 @@ BOOK_CSS = """
         linear-gradient(180deg, #fffdf8, #faf3e6);
       box-shadow: 0 16px 40px rgba(85, 58, 31, 0.14);
     }
-    .book-spread:not(.two) .book-page { max-width: 640px; margin: 0 auto; }
+    .book-spread:not(.two) .book-page { margin: 0 auto; }
     .book-spread.two .book-page { border: 0; border-radius: 0; box-shadow: none; }
     .book-spread.two .book-page:first-child {
       border-radius: 14px 0 0 14px;
@@ -269,18 +271,21 @@ BOOK_CSS = """
     }
 
     .log-table {
-      width: 100%;
+      width: auto;
       table-layout: fixed;
       border-collapse: collapse;
       font-variant-numeric: tabular-nums;
       font-size: 0.88rem;
     }
+    .log-table col.col-n { width: var(--n-width); }
+    .log-table col.col-value { width: var(--value-width); }
     .log-table thead th:first-child { text-align: right; }
     .log-table th,
     .log-table td {
       border: 1px solid rgba(215, 200, 180, 0.7);
       padding: 3px 6px;
       text-align: right;
+      white-space: nowrap;
     }
     .log-table thead th {
       background: rgba(124, 77, 43, 0.08);
@@ -327,8 +332,8 @@ BOOK_CSS = """
 
     @media (max-width: 720px) {
       .book-spread.two { grid-template-columns: 1fr; }
+      .book-spread.two .book-page { width: auto; max-width: 100%; }
       .book-spread.two::after { display: none; }
-      .book-spread.two .book-page { border-radius: 14px; }
     }
 """
 
@@ -472,14 +477,13 @@ BOOK_TEMPLATE = """<!doctype html>
         var element = spread();
         if (!element) return;
         element.style.zoom = 1;
-        var width = element.offsetWidth;
-        var height = element.offsetHeight;
-        var top = element.getBoundingClientRect().top;
+        var rect = element.getBoundingClientRect();
+        var top = rect.top;
         var controls = document.querySelector('.book-controls');
         var chrome = (controls ? controls.offsetHeight : 0) + 56;
         var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
         var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
-        zoom = Math.min(availableWidth / width, availableHeight / height, 1.5);
+        zoom = Math.min(availableWidth / rect.width, availableHeight / rect.height, 1.5);
         zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
         apply();
       }
@@ -537,7 +541,11 @@ BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}">
 BOOK_PAGE_TEMPLATE = """<section class="book-page">
   <h3>Page {page} of {total}: {start} to {end}</h3>
   <p class="legend">Each entry gives the digits only — 3010 reads 0.3010.</p>
-  <table class="log-table">
+  <table class="log-table" style="--value-width: {value_width}ch; --n-width: {n_width}ch">
+    <colgroup>
+      <col class="col-n">
+      {column_cols}
+    </colgroup>
     <thead>
       <tr><th>N</th>{column_heads}</tr>
     </thead>
@@ -615,6 +623,10 @@ def _render_book_page(
         first_value + ROWS_PER_BOOK_PAGE * 10 - 1, 10 ** (spec.precision + 1) - 1
     )
     column_heads = "".join(f"<th>{column}</th>" for column in range(10))
+    column_cols = '<col class="col-value">' * 10
+    max_row_number = (10 ** (spec.precision + 1) - 1) // 10
+    n_width = len(str(max_row_number)) + 1
+    value_width = spec.log_precision + 1
     body_rows = []
     for row_start in range(first_value, last_value + 1, 10):
         row_number = row_start // 10
@@ -639,6 +651,9 @@ def _render_book_page(
         total=total_pages,
         start=scaled_to_text(first_value, spec.precision),
         end=scaled_to_text(last_value, spec.precision),
+        value_width=value_width,
+        n_width=n_width,
+        column_cols=column_cols,
         column_heads=column_heads,
         rows="\n      ".join(body_rows),
     )

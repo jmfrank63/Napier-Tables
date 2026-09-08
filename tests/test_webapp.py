@@ -335,3 +335,26 @@ def test_row_labels_show_full_number_every_five_rows_only(client):
     assert "<th>16</th>" not in body
     assert "<th>1</th>" in body
     assert "<th>6</th>" in body
+
+
+def test_table_columns_scale_with_digit_counts(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+    client.post(
+        "/tables",
+        data={"precision": "9", "log_precision": "15"},
+        headers={"HX-Request": "true"},
+    )
+
+    small = client.get("/tables/1/read").get_data(as_text=True)
+    assert "--value-width: 5ch" in small
+    assert "--n-width: 3ch" in small
+    assert small.count('<col class="col-value">') == 10
+
+    large = client.get("/tables/2/read").get_data(as_text=True)
+    assert "--value-width: 16ch" in large
+    assert "--n-width: 10ch" in large
+    assert large.count('<col class="col-value">') == 10
