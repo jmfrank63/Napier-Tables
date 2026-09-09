@@ -362,3 +362,18 @@ def test_table_columns_scale_with_digit_counts(client):
     assert "--value-width: 16ch" in large
     assert "--n-width: 10ch" in large
     assert large.count('<col class="col-value">') == 10
+
+
+def test_reader_layout_fills_viewport_without_scrolling(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read").get_data(as_text=True)
+
+    assert "overflow: hidden" in body
+    assert "100vh" in body
+    assert 'class="book-stage"' in body
+    assert "availableSpace" in body

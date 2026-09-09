@@ -166,13 +166,32 @@ BASE_CSS = """
 """
 
 BOOK_CSS = """
+    body { overflow: hidden; }
+
     .book-shell {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 36px 20px 60px;
+      height: 100vh;
+      padding: 14px 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-sizing: border-box;
     }
 
-    .book { display: grid; gap: 18px; }
+    .book-stage {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      overflow: auto;
+    }
+
+    .book {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
     @keyframes book-appear {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: none; }
@@ -180,11 +199,11 @@ BOOK_CSS = """
     .book { animation: book-appear 260ms ease; }
 
     .zoom-bar {
+      flex: none;
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 8px;
-      margin-bottom: 2px;
     }
     .zoom-bar .link-button { padding: 6px 14px; }
     .zoom-level {
@@ -196,6 +215,7 @@ BOOK_CSS = """
     }
 
     .book-toolbar {
+      flex: none;
       display: flex;
       justify-content: space-between;
       gap: 12px;
@@ -204,10 +224,15 @@ BOOK_CSS = """
     }
     .book-toolbar strong { font-size: 1.15rem; }
 
-    .book-spread { display: grid; gap: 24px; }
+    .book-spread {
+      width: max-content;
+      margin: auto;
+      flex: none;
+      display: grid;
+      gap: 24px;
+    }
     .book-spread.two {
       grid-template-columns: repeat(2, max-content);
-      justify-content: center;
       gap: 0;
       position: relative;
       border-radius: 6px;
@@ -462,7 +487,9 @@ BOOK_TEMPLATE = """<!doctype html>
       <button class="link-button" id="zoom-in" type="button" aria-label="Zoom in">+</button>
       <button class="link-button" id="zoom-fit" type="button">Fit page</button>
     </div>
-    {{ book|safe }}
+    <div class="book-stage">
+      {{ book|safe }}
+    </div>
   </main>
   <script>
     (function () {
@@ -482,17 +509,27 @@ BOOK_TEMPLATE = """<!doctype html>
         document.getElementById('zoom-level').textContent = Math.round(zoom * 100) + '%';
       }
 
+      function availableSpace() {
+        var stage = document.querySelector('.book-stage');
+        var toolbar = document.querySelector('.book-toolbar');
+        var controls = document.querySelector('.book-controls');
+        var height = stage.clientHeight
+          - (toolbar ? toolbar.offsetHeight : 0)
+          - (controls ? controls.offsetHeight : 0)
+          - 24;
+        return {
+          width: stage.clientWidth,
+          height: Math.max(height, 140)
+        };
+      }
+
       function fit() {
         var element = spread();
         if (!element) return;
         element.style.zoom = 1;
+        var space = availableSpace();
         var rect = element.getBoundingClientRect();
-        var top = rect.top;
-        var controls = document.querySelector('.book-controls');
-        var chrome = (controls ? controls.offsetHeight : 0) + 56;
-        var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
-        var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
-        zoom = Math.min(availableWidth / rect.width, availableHeight / rect.height, MAX_ZOOM);
+        zoom = Math.min(space.width / rect.width, space.height / rect.height, MAX_ZOOM);
         zoom = Math.max(MIN_ZOOM, zoom);
         apply();
       }
@@ -516,26 +553,20 @@ BOOK_TEMPLATE = """<!doctype html>
         var previous = element.style.zoom;
         element.style.zoom = 1;
         var pageRect = page.getBoundingClientRect();
-        var top = element.getBoundingClientRect().top;
         element.style.zoom = previous;
-        var controls = document.querySelector('.book-controls');
-        var chrome = (controls ? controls.offsetHeight : 0) + 56;
-        var availableWidth = document.querySelector('.book-shell').clientWidth - 40;
-        var availableHeight = Math.max(window.innerHeight - top - chrome, 140);
+        var space = availableSpace();
         var singleScale = Math.min(
-          availableWidth / pageRect.width,
-          availableHeight / pageRect.height,
+          space.width / pageRect.width,
+          space.height / pageRect.height,
           MAX_ZOOM
         );
         var spreadScale = Math.min(
-          availableWidth / (pageRect.width * 2 + 4),
-          availableHeight / pageRect.height,
+          space.width / (pageRect.width * 2 + 4),
+          space.height / pageRect.height,
           MAX_ZOOM
         );
         var wantSpread;
-        if (singleScale <= 1 !== spreadScale <= 1) {
-          wantSpread = spreadScale <= 1;
-        } else if (singleScale === spreadScale) {
+        if (singleScale === spreadScale) {
           wantSpread = window.innerWidth > window.innerHeight;
         } else {
           wantSpread = spreadScale > singleScale;
