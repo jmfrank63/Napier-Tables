@@ -795,18 +795,28 @@ def _page_for_value(
     return row_index // rows + 1, row_index
 
 
-def _row_header(row_number: int, previous_lead: int | None, precision: int) -> str:
-    """Fraction digits of the row value; full label only at an integer change.
+def _row_header(row_number: int, previous_row: int | None, precision: int) -> str:
+    """Print like a 16th-century printer: full number once, then only the
+    digits that changed.
 
-    The integer part is obvious from the page heading, so the label shows just
-    the fraction after the comma — ``4.542995440`` renders as ``54299544``.
+    The first row of a page carries the full fraction; each following row
+    shows the shortest suffix that differs from the row above (``54299520``,
+    ``1``, ``2``, … ``9``, ``30``, ``1``, …). The integer part lives in the
+    page heading, so it is printed only where it actually changes.
     """
     if precision == 1:
         return str(row_number)
     lead = row_number // 10 ** (precision - 1)
-    if previous_lead is None or lead != previous_lead:
+    if previous_row is not None and lead != previous_row // 10 ** (precision - 1):
         return str(row_number)
-    return f"{row_number % 10 ** (precision - 1):0{precision - 1}d}"
+    fraction = f"{row_number % 10 ** (precision - 1):0{precision - 1}d}"
+    if previous_row is None:
+        return fraction
+    previous_fraction = f"{previous_row % 10 ** (precision - 1):0{precision - 1}d}"
+    shared = 0
+    while shared < len(fraction) and fraction[shared] == previous_fraction[shared]:
+        shared += 1
+    return fraction[shared:]
 
 
 def _render_book_page(
@@ -825,11 +835,11 @@ def _render_book_page(
     value_width = spec.log_precision + 1
     lead = str(first_value // 10**spec.precision) + "."
     body_rows = []
-    previous_lead: int | None = first_value // 10**spec.precision
+    previous_row: int | None = None
     for row_start in range(first_value, last_value + 1, 10):
         row_number = row_start // 10
-        row_header = _row_header(row_number, previous_lead, spec.precision)
-        previous_lead = row_number // 10 ** (spec.precision - 1)
+        row_header = _row_header(row_number, previous_row, spec.precision)
+        previous_row = row_number
         row_class = (
             ' class="located"'
             if highlight_row is not None and row_number == highlight_row

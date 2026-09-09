@@ -285,7 +285,7 @@ def test_value_jump_respects_table_precision(client):
     body = client.get("/tables/1/read?value=2.1212").get_data(as_text=True)
 
     assert "Page 57 of 450 · N 2.: 2.1200 to 2.1399" in body
-    assert '<tr class="located"><th>121</th>' in body
+    assert '<tr class="located"><th>1</th>' in body
 
 
 def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
@@ -322,7 +322,7 @@ def test_entries_print_bare_mantissas_without_leading_zero(client):
     assert ">9996</td>" not in body
 
 
-def test_row_labels_show_fraction_digits_only(client):
+def test_row_labels_print_changing_digits_only(client):
     client.post(
         "/tables",
         data={"precision": "2", "log_precision": "4"},
@@ -332,10 +332,10 @@ def test_row_labels_show_fraction_digits_only(client):
     body = client.get("/tables/1/read").get_data(as_text=True)
 
     assert "<th>0</th>" in body
+    assert "<th>1</th>" in body
     assert "<th>9</th>" in body
+    assert "<th>19</th>" not in body
     assert "<th>10</th>" not in body
-    assert "<th>11</th>" not in body
-    assert "<th>15</th>" not in body
     assert "<th>16</th>" not in body
 
 
