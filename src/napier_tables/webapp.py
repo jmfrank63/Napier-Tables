@@ -497,9 +497,24 @@ BOOK_TEMPLATE = """<!doctype html>
       var MAX_ZOOM = 3;
       var zoom = 1;
       var pendingRefit = false;
+      var refreshTimer = null;
+      var pinnedSpread = new URLSearchParams(location.search).get('spread') === '1';
 
       function spread() {
         return document.querySelector('.book-spread');
+      }
+
+      function bookMeta() {
+        var element = document.getElementById('book');
+        if (!element || !element.dataset.rows) return null;
+        return {
+          element: element,
+          tableId: parseInt(element.dataset.tableId, 10) || 1,
+          page: parseInt(element.dataset.page, 10) || 1,
+          rows: parseInt(element.dataset.rows, 10) || 20,
+          precision: parseInt(element.dataset.precision, 10) || 2,
+          firstValue: parseInt(element.dataset.firstValue, 10) || 0
+        };
       }
 
       function apply() {
@@ -544,8 +559,47 @@ BOOK_TEMPLATE = """<!doctype html>
         return Boolean(element && element.classList.contains('two'));
       }
 
+      function targetRows() {
+        var element = spread();
+        if (!element) return null;
+        var page = element.querySelector('.book-page');
+        var tbody = element.querySelector('.log-table tbody');
+        if (!page || !tbody) return null;
+        var previous = element.style.zoom;
+        element.style.zoom = 1;
+        var pageRect = page.getBoundingClientRect();
+        var tbodyRect = tbody.getBoundingClientRect();
+        var firstRow = tbody.querySelector('tr');
+        var rowHeight = firstRow ? firstRow.getBoundingClientRect().height : 0;
+        element.style.zoom = previous;
+        if (!rowHeight) return null;
+        var twoUp = element.classList.contains('two');
+        var naturalWidth = twoUp ? pageRect.width * 2 + 4 : pageRect.width;
+        var fixed = pageRect.height - tbodyRect.height;
+        var space = availableSpace();
+        var zoomFit = Math.min(space.width / naturalWidth, 1, MAX_ZOOM);
+        zoomFit = Math.max(zoomFit, MIN_ZOOM);
+        var rows = Math.floor((space.height / zoomFit - fixed) / rowHeight);
+        return Math.max(5, Math.min(150, rows));
+      }
+
+      function refreshRowsIfChanged() {
+        if (pendingRefit) return;
+        var meta = bookMeta();
+        if (!meta) return;
+        var target = targetRows();
+        if (target === null || target === meta.rows) return;
+        var startRow = Math.round((meta.firstValue - Math.pow(10, meta.precision)) / 10);
+        var newPage = Math.floor(startRow / target) + 1;
+        var url = '/tables/' + meta.tableId + '/read?page=' + newPage +
+          '&spread=' + (viewIsSpread() ? '1' : '0') + '&rows=' + target;
+        pendingRefit = true;
+        history.replaceState({}, '', url);
+        htmx.ajax('GET', url, { target: '#book', swap: 'outerHTML' });
+      }
+
       function syncView() {
-        if (document.body.dataset.manualView) return;
+        if (pinnedSpread || document.body.dataset.manualView) return;
         var element = spread();
         if (!element) return;
         var page = element.querySelector('.book-page');
@@ -600,16 +654,23 @@ BOOK_TEMPLATE = """<!doctype html>
         } else {
           apply();
         }
+        refreshRowsIfChanged();
       });
       window.addEventListener('resize', function () {
         fit();
         syncView();
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshRowsIfChanged, 180);
       });
-      fit();
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', syncView);
-      } else {
+      function init() {
+        fit();
         syncView();
+        refreshRowsIfChanged();
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
       }
     })();
   </script>
@@ -617,7 +678,7 @@ BOOK_TEMPLATE = """<!doctype html>
 </html>
 """
 
-BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}">
+BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}" data-page="{first_page}" data-rows="{rows}" data-precision="{precision}" data-first-value="{first_value}">
   <div class="book-toolbar">
     <div>
       <strong>Table {id}</strong>
@@ -635,12 +696,14 @@ BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}">
       <label for="jump-page-{id}">Page</label>
       <input id="jump-page-{id}" name="page" type="number" min="1" max="{total_pages}" placeholder="{page_placeholder}">
       <input type="hidden" name="spread" value="{spread_value}">
+      <input type="hidden" name="rows" value="{rows}">
       <button class="link-button" type="submit">Go</button>
     </form>
     <form class="jump-form" hx-get="{reader_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">
       <label for="jump-value-{id}">Value</label>
       <input id="jump-value-{id}" name="value" type="text" inputmode="decimal" placeholder="{value_placeholder}">
       <input type="hidden" name="spread" value="{spread_value}">
+      <input type="hidden" name="rows" value="{rows}">
       <button class="link-button" type="submit">Go</button>
     </form>
     <button class="link-button" hx-get="{toggle_url}" hx-target="#book" hx-swap="outerHTML" hx-push-url="true">{toggle_label}</button>
@@ -669,6 +732,8 @@ BOOK_PAGE_TEMPLATE = """<section class="book-page">
 
 
 ROWS_PER_BOOK_PAGE = 20
+MIN_ROWS_PER_PAGE = 5
+MAX_ROWS_PER_PAGE = 150
 
 
 class Base(DeclarativeBase):
@@ -704,9 +769,9 @@ def _render_page(rows: list[TableSpec]) -> str:
     )
 
 
-def _book_page_count(precision: int) -> int:
+def _book_page_count(precision: int, rows: int = ROWS_PER_BOOK_PAGE) -> int:
     total_rows = 9 * 10 ** (precision - 1)
-    return -(-total_rows // ROWS_PER_BOOK_PAGE)
+    return -(-total_rows // rows)
 
 
 def _locate_value(raw: str, precision: int) -> int:
@@ -722,18 +787,22 @@ def _locate_value(raw: str, precision: int) -> int:
     return min(max(scaled, 10**precision), 10 ** (precision + 1) - 1)
 
 
-def _page_for_value(scaled_value: int, precision: int) -> int:
+def _page_for_value(
+    scaled_value: int, precision: int, rows: int = ROWS_PER_BOOK_PAGE
+) -> int:
     row_index = (scaled_value - 10**precision) // 10
-    return row_index // ROWS_PER_BOOK_PAGE + 1
+    return row_index // rows + 1
 
 
 def _render_book_page(
-    spec: TableSpec, page_number: int, total_pages: int, highlight_row: int | None = None
+    spec: TableSpec,
+    page_number: int,
+    total_pages: int,
+    rows: int = ROWS_PER_BOOK_PAGE,
+    highlight_row: int | None = None,
 ) -> str:
-    first_value = 10**spec.precision + (page_number - 1) * ROWS_PER_BOOK_PAGE * 10
-    last_value = min(
-        first_value + ROWS_PER_BOOK_PAGE * 10 - 1, 10 ** (spec.precision + 1) - 1
-    )
+    first_value = 10**spec.precision + (page_number - 1) * rows * 10
+    last_value = min(first_value + rows * 10 - 1, 10 ** (spec.precision + 1) - 1)
     column_heads = "".join(f"<th>{column}</th>" for column in range(10))
     column_cols = '<col class="col-value">' * 10
     max_row_number = (10 ** (spec.precision + 1) - 1) // 10
@@ -772,9 +841,13 @@ def _render_book_page(
 
 
 def _render_book(
-    spec: TableSpec, page: int, spread: bool, highlight_value: int | None = None
+    spec: TableSpec,
+    page: int,
+    spread: bool,
+    highlight_value: int | None = None,
+    rows: int = ROWS_PER_BOOK_PAGE,
 ) -> str:
-    total_pages = _book_page_count(spec.precision)
+    total_pages = _book_page_count(spec.precision, rows)
     reader_url = f"/tables/{spec.id}/read"
     highlight_row = highlight_value // 10 if highlight_value is not None else None
 
@@ -799,20 +872,24 @@ def _render_book(
         spread_class = ""
 
     pages_html = "\n".join(
-        _render_book_page(spec, number, total_pages, highlight_row) for number in shown
+        _render_book_page(spec, number, total_pages, rows, highlight_row)
+        for number in shown
     )
     if len(shown) > 1:
         pages_label = f"Pages {shown[0]}–{shown[-1]} of {total_pages}"
     else:
         pages_label = f"Page {shown[0]} of {total_pages}"
 
-    first_shown_value = 10**spec.precision + (shown[0] - 1) * ROWS_PER_BOOK_PAGE * 10
+    first_shown_value = 10**spec.precision + (shown[0] - 1) * rows * 10
     value_placeholder = scaled_to_text(first_shown_value, spec.precision)
 
     return BOOK_FRAGMENT_TEMPLATE.format(
         id=spec.id,
         precision=spec.precision,
         log_precision=spec.log_precision,
+        first_page=shown[0],
+        rows=rows,
+        first_value=first_shown_value,
         pages_label=pages_label,
         pages=pages_html,
         spread_class=spread_class,
@@ -821,11 +898,11 @@ def _render_book(
         page_placeholder=page,
         value_placeholder=value_placeholder,
         spread_value=int(spread),
-        back_url=f"{reader_url}?page={back_page}&spread={int(spread)}",
+        back_url=f"{reader_url}?page={back_page}&spread={int(spread)}&rows={rows}",
         back_disabled="disabled" if back_page == page else "",
-        forward_url=f"{reader_url}?page={forward_page}&spread={int(spread)}",
+        forward_url=f"{reader_url}?page={forward_page}&spread={int(spread)}&rows={rows}",
         forward_disabled="disabled" if forward_page == page else "",
-        toggle_url=f"{reader_url}?page={toggle_page}&spread={toggle_spread}",
+        toggle_url=f"{reader_url}?page={toggle_page}&spread={toggle_spread}&rows={rows}",
         toggle_label=toggle_label,
     )
 
@@ -864,6 +941,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     engine = create_engine(database_url, future=True)
     Base.metadata.create_all(engine)
     SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    @app.after_request
+    def no_store(response):
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def get_session() -> Session:
         return SessionFactory()
@@ -927,6 +1009,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             page = int(request.args.get("page", "1"))
         except ValueError:
             abort(400)
+        try:
+            rows = int(request.args.get("rows", ROWS_PER_BOOK_PAGE))
+        except ValueError:
+            abort(400)
+        rows = max(MIN_ROWS_PER_PAGE, min(MAX_ROWS_PER_PAGE, rows))
 
         raw_value = request.args.get("value", "").strip()
         highlight_value = None
@@ -935,9 +1022,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 highlight_value = _locate_value(raw_value, row.precision)
             except ValueError:
                 abort(400)
-            page = _page_for_value(highlight_value, row.precision)
+            page = _page_for_value(highlight_value, row.precision, rows)
 
-        fragment = _render_book(row, page, spread, highlight_value)
+        fragment = _render_book(row, page, spread, highlight_value, rows)
         if _is_htmx_request():
             return fragment
         return render_template_string(

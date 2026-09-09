@@ -377,3 +377,68 @@ def test_reader_layout_fills_viewport_without_scrolling(client):
     assert "100vh" in body
     assert 'class="book-stage"' in body
     assert "availableSpace" in body
+
+
+def test_rows_parameter_controls_rows_per_page(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?rows=30").get_data(as_text=True)
+
+    assert "Page 1 of 3: 1.00 to 3.99" in body
+    assert "<th>30</th>" in body
+    assert 'data-rows="30"' in body
+    assert 'data-first-value="100"' in body
+
+
+def test_rows_parameter_is_clamped(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    wide = client.get("/tables/1/read?rows=5000").get_data(as_text=True)
+    assert "Page 1 of 1: 1.00 to 9.99" in wide
+
+    narrow = client.get("/tables/1/read?rows=1").get_data(as_text=True)
+    assert "Page 1 of 18: 1.00 to 1.49" in narrow
+
+
+def test_value_jump_respects_rows_parameter(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?value=4.5&rows=30").get_data(as_text=True)
+
+    assert "Page 2 of 3: 4.00 to 6.99" in body
+    assert '<tr class="located"><th>45</th>' in body
+
+
+def test_invalid_rows_parameter_is_rejected(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert client.get("/tables/1/read?rows=oops").status_code == 400
+
+
+def test_navigation_urls_carry_rows_parameter(client):
+    client.post(
+        "/tables",
+        data={"precision": "2", "log_precision": "4"},
+        headers={"HX-Request": "true"},
+    )
+
+    body = client.get("/tables/1/read?rows=30").get_data(as_text=True)
+
+    assert "rows=30" in body
+    assert 'name="rows"' in body
