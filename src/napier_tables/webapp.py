@@ -714,7 +714,7 @@ BOOK_FRAGMENT_TEMPLATE = """<div id="book" class="book" data-table-id="{id}" dat
 """
 
 BOOK_PAGE_TEMPLATE = """<section class="book-page">
-  <h3>Page {page} of {total}: {start} to {end}</h3>
+  <h3>Page {page} of {total} · N {lead}: {start} to {end}</h3>
   <p class="legend">Each entry gives the digits only — 3010 reads 0.3010.</p>
   <table class="log-table" style="--value-width: {value_width}ch; --n-width: {n_width}ch">
     <colgroup>
@@ -789,9 +789,24 @@ def _locate_value(raw: str, precision: int) -> int:
 
 def _page_for_value(
     scaled_value: int, precision: int, rows: int = ROWS_PER_BOOK_PAGE
-) -> int:
+) -> tuple[int, int]:
+    """Return the page number and row index containing ``scaled_value``."""
     row_index = (scaled_value - 10**precision) // 10
-    return row_index // rows + 1
+    return row_index // rows + 1, row_index
+
+
+def _row_header(row_number: int, previous_lead: int | None, precision: int) -> str:
+    """Fraction digits of the row value; full label only at an integer change.
+
+    The integer part is obvious from the page heading, so the label shows just
+    the fraction after the comma — ``4.542995440`` renders as ``54299544``.
+    """
+    if precision == 1:
+        return str(row_number)
+    lead = row_number // 10 ** (precision - 1)
+    if previous_lead is None or lead != previous_lead:
+        return str(row_number)
+    return f"{row_number % 10 ** (precision - 1):0{precision - 1}d}"
 
 
 def _render_book_page(
@@ -808,13 +823,13 @@ def _render_book_page(
     max_row_number = (10 ** (spec.precision + 1) - 1) // 10
     n_width = len(str(max_row_number)) + 1
     value_width = spec.log_precision + 1
+    lead = str(first_value // 10**spec.precision) + "."
     body_rows = []
+    previous_lead: int | None = first_value // 10**spec.precision
     for row_start in range(first_value, last_value + 1, 10):
         row_number = row_start // 10
-        if row_number % 5 == 0:
-            row_header = str(row_number)
-        else:
-            row_header = str(row_number % 10)
+        row_header = _row_header(row_number, previous_lead, spec.precision)
+        previous_lead = row_number // 10 ** (spec.precision - 1)
         row_class = (
             ' class="located"'
             if highlight_row is not None and row_number == highlight_row
@@ -830,6 +845,7 @@ def _render_book_page(
     return BOOK_PAGE_TEMPLATE.format(
         page=page_number,
         total=total_pages,
+        lead=lead,
         start=scaled_to_text(first_value, spec.precision),
         end=scaled_to_text(last_value, spec.precision),
         value_width=value_width,
@@ -1022,7 +1038,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 highlight_value = _locate_value(raw_value, row.precision)
             except ValueError:
                 abort(400)
-            page = _page_for_value(highlight_value, row.precision, rows)
+            page, _ = _page_for_value(highlight_value, row.precision, rows)
 
         fragment = _render_book(row, page, spread, highlight_value, rows)
         if _is_htmx_request():

@@ -108,7 +108,7 @@ def test_read_page_renders_first_book_page_with_log_values(client):
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Page 1 of 5: 1.00 to 2.99" in body
+    assert "Page 1 of 5 · N 1.: 1.00 to 2.99" in body
     assert "0000" in body
     assert "0043" in body
     assert "3010" in body
@@ -125,13 +125,13 @@ def test_read_page_clamps_out_of_range_pages_to_the_boundaries(client):
     )
 
     second = client.get("/tables/1/read?page=2").get_data(as_text=True)
-    assert "Page 2 of 5: 3.00 to 4.99" in second
+    assert "Page 2 of 5 · N 3.: 3.00 to 4.99" in second
 
     last = client.get("/tables/1/read?page=999").get_data(as_text=True)
-    assert "Page 5 of 5: 9.00 to 9.99" in last
+    assert "Page 5 of 5 · N 9.: 9.00 to 9.99" in last
 
     first = client.get("/tables/1/read?page=0").get_data(as_text=True)
-    assert "Page 1 of 5: 1.00 to 2.99" in first
+    assert "Page 1 of 5 · N 1.: 1.00 to 2.99" in first
 
 
 def test_read_page_two_page_spread_shows_both_sheets(client):
@@ -145,8 +145,8 @@ def test_read_page_two_page_spread_shows_both_sheets(client):
 
     body = response.get_data(as_text=True)
     assert "Pages 1–2 of 5" in body
-    assert "Page 1 of 5: 1.00 to 2.99" in body
-    assert "Page 2 of 5: 3.00 to 4.99" in body
+    assert "Page 1 of 5 · N 1.: 1.00 to 2.99" in body
+    assert "Page 2 of 5 · N 3.: 3.00 to 4.99" in body
     assert "One page" in body
 
 
@@ -215,8 +215,8 @@ def test_value_jump_lands_on_page_and_highlights_row(client):
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Page 2 of 5: 3.00 to 4.99" in body
-    assert '<tr class="located"><th>45</th>' in body
+    assert "Page 2 of 5 · N 3.: 3.00 to 4.99" in body
+    assert '<tr class="located"><th>5</th>' in body
     assert "6532" in body
 
 
@@ -230,9 +230,9 @@ def test_value_jump_in_spread_mode_shows_odd_even_pair(client):
     body = client.get("/tables/1/read?value=5&spread=1").get_data(as_text=True)
 
     assert "Pages 3–4 of 5" in body
-    assert "Page 3 of 5: 5.00 to 6.99" in body
-    assert "Page 4 of 5: 7.00 to 8.99" in body
-    assert '<tr class="located"><th>50</th>' in body
+    assert "Page 3 of 5 · N 5.: 5.00 to 6.99" in body
+    assert "Page 4 of 5 · N 7.: 7.00 to 8.99" in body
+    assert '<tr class="located"><th>0</th>' in body
 
 
 def test_value_jump_even_page_pairing_in_spread_mode(client):
@@ -245,8 +245,8 @@ def test_value_jump_even_page_pairing_in_spread_mode(client):
     body = client.get("/tables/1/read?value=7&spread=1").get_data(as_text=True)
 
     assert "Pages 3–4 of 5" in body
-    assert "Page 3 of 5: 5.00 to 6.99" in body
-    assert "Page 4 of 5: 7.00 to 8.99" in body
+    assert "Page 3 of 5 · N 5.: 5.00 to 6.99" in body
+    assert "Page 4 of 5 · N 7.: 7.00 to 8.99" in body
 
 
 def test_value_jump_clamps_out_of_range_values(client):
@@ -257,10 +257,10 @@ def test_value_jump_clamps_out_of_range_values(client):
     )
 
     below = client.get("/tables/1/read?value=0.25").get_data(as_text=True)
-    assert "Page 1 of 5: 1.00 to 2.99" in below
+    assert "Page 1 of 5 · N 1.: 1.00 to 2.99" in below
 
     above = client.get("/tables/1/read?value=42").get_data(as_text=True)
-    assert "Page 5 of 5: 9.00 to 9.99" in above
+    assert "Page 5 of 5 · N 9.: 9.00 to 9.99" in above
 
 
 def test_value_jump_rejects_garbage_but_allows_empty(client):
@@ -284,8 +284,8 @@ def test_value_jump_respects_table_precision(client):
 
     body = client.get("/tables/1/read?value=2.1212").get_data(as_text=True)
 
-    assert "Page 57 of 450: 2.1200 to 2.1399" in body
-    assert '<tr class="located"><th>1</th>' in body
+    assert "Page 57 of 450 · N 2.: 2.1200 to 2.1399" in body
+    assert '<tr class="located"><th>121</th>' in body
 
 
 def test_reader_page_starts_with_fit_to_viewport_zoom_controls(client):
@@ -322,7 +322,7 @@ def test_entries_print_bare_mantissas_without_leading_zero(client):
     assert ">9996</td>" not in body
 
 
-def test_row_labels_show_full_number_every_five_rows_only(client):
+def test_row_labels_show_fraction_digits_only(client):
     client.post(
         "/tables",
         data={"precision": "2", "log_precision": "4"},
@@ -331,14 +331,12 @@ def test_row_labels_show_full_number_every_five_rows_only(client):
 
     body = client.get("/tables/1/read").get_data(as_text=True)
 
-    assert "<th>10</th>" in body
-    assert "<th>15</th>" in body
-    assert "<th>20</th>" in body
-    assert "<th>25</th>" in body
+    assert "<th>0</th>" in body
+    assert "<th>9</th>" in body
+    assert "<th>10</th>" not in body
     assert "<th>11</th>" not in body
+    assert "<th>15</th>" not in body
     assert "<th>16</th>" not in body
-    assert "<th>1</th>" in body
-    assert "<th>6</th>" in body
 
 
 def test_table_columns_scale_with_digit_counts(client):
@@ -388,7 +386,7 @@ def test_rows_parameter_controls_rows_per_page(client):
 
     body = client.get("/tables/1/read?rows=30").get_data(as_text=True)
 
-    assert "Page 1 of 3: 1.00 to 3.99" in body
+    assert "Page 1 of 3 · N 1.: 1.00 to 3.99" in body
     assert "<th>30</th>" in body
     assert 'data-rows="30"' in body
     assert 'data-first-value="100"' in body
@@ -402,10 +400,10 @@ def test_rows_parameter_is_clamped(client):
     )
 
     wide = client.get("/tables/1/read?rows=5000").get_data(as_text=True)
-    assert "Page 1 of 1: 1.00 to 9.99" in wide
+    assert "Page 1 of 1 · N 1.: 1.00 to 9.99" in wide
 
     narrow = client.get("/tables/1/read?rows=1").get_data(as_text=True)
-    assert "Page 1 of 18: 1.00 to 1.49" in narrow
+    assert "Page 1 of 18 · N 1.: 1.00 to 1.49" in narrow
 
 
 def test_value_jump_respects_rows_parameter(client):
@@ -417,8 +415,8 @@ def test_value_jump_respects_rows_parameter(client):
 
     body = client.get("/tables/1/read?value=4.5&rows=30").get_data(as_text=True)
 
-    assert "Page 2 of 3: 4.00 to 6.99" in body
-    assert '<tr class="located"><th>45</th>' in body
+    assert "Page 2 of 3 · N 4.: 4.00 to 6.99" in body
+    assert '<tr class="located"><th>5</th>' in body
 
 
 def test_invalid_rows_parameter_is_rejected(client):
