@@ -88,6 +88,9 @@ BASE_CSS = """
     .form-body { padding: 18px 20px 20px; display: grid; gap: 14px; }
     .fields { display: grid; gap: 12px; }
     .field { display: grid; gap: 6px; }
+    .optimal-row { display: flex; gap: 10px; align-items: center; }
+    .optimal-row input[type="number"] { width: 7em; }
+    .optimal-row .button { white-space: nowrap; }
     label { font-weight: 700; font-size: 0.95rem; }
     input[type="number"] {
       width: 100%;
@@ -393,7 +396,11 @@ INDEX_TEMPLATE = """<!doctype html>
             </div>
             <div class="field">
               <label for="log_precision">Log precision</label>
-              <input id="log_precision" name="log_precision" type="number" min="1" step="1" required>
+              <div class="optimal-row">
+                <input id="log_precision" name="log_precision" type="number" min="1" step="1" required>
+                <button type="button" class="button secondary" id="optimal-log"
+                  title="Fewest log digits with no repeated mantissas: precision + 1 (precision + 2 below precision 3)">Optimal</button>
+              </div>
             </div>
           </div>
           <div class="actions">
@@ -414,6 +421,14 @@ INDEX_TEMPLATE = """<!doctype html>
       url.searchParams.set("spread", window.innerWidth > window.innerHeight ? "1" : "0");
       link.href = url.toString();
     }, true);
+    document.addEventListener("click", function (event) {
+      if (!event.target.closest("#optimal-log")) return;
+      var precision = parseInt(document.getElementById("precision").value, 10);
+      if (precision >= 1) {
+        document.getElementById("log_precision").value =
+          precision <= 2 ? precision + 2 : precision + 1;
+      }
+    });
   </script>
 </body>
 </html>

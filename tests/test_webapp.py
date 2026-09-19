@@ -190,6 +190,14 @@ def test_table_list_links_to_the_reader(client):
     assert 'href="/tables/1/read"' in body
 
 
+def test_create_form_offers_optimal_log_precision_button(client):
+    body = client.get("/").get_data(as_text=True)
+
+    assert 'id="optimal-log"' in body
+    assert 'id="precision"' in body
+    assert 'id="log_precision"' in body
+
+
 def test_reader_offers_page_and_value_jump_forms(client):
     client.post(
         "/tables",
