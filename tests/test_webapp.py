@@ -1,8 +1,15 @@
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
-from napier_tables.webapp import create_app
+from napier_tables.integer_log import log10_scaled
+from napier_tables.webapp import (
+    _cached_book_page,
+    _render_book_page,
+    create_app,
+    optimal_log_precision,
+)
 
 
 @pytest.fixture()
@@ -196,6 +203,36 @@ def test_create_form_offers_optimal_log_precision_button(client):
     assert 'id="optimal-log"' in body
     assert 'id="precision"' in body
     assert 'id="log_precision"' in body
+
+
+def test_optimal_log_precision_has_no_collisions_anywhere():
+    for precision in range(1, 7):
+        digits = optimal_log_precision(precision)
+        low, high = 10**precision, 10 ** (precision + 1) - 1
+        if precision <= 3:
+            samples = range(low, high + 1)
+        else:  # steps are smallest at the top of the range: check both ends
+            samples = list(range(low, low + 300)) + list(range(high - 300, high + 1))
+        mantissas = [log10_scaled(n, precision, digits) for n in samples]
+        assert all(b > a for a, b in zip(mantissas, mantissas[1:]))
+        assert max(mantissas) < 10**digits
+
+
+def test_create_form_documents_the_optimal_rule(client):
+    body = client.get("/").get_data(as_text=True)
+
+    assert "precision + 2" in body
+
+
+def test_plain_book_pages_are_served_from_cache():
+    spec = SimpleNamespace(precision=2, log_precision=4)
+    _cached_book_page.cache_clear()
+
+    first = _render_book_page(spec, 1, 5)
+    second = _render_book_page(spec, 1, 5)
+
+    assert first == second
+    assert _cached_book_page.cache_info().hits == 1
 
 
 def test_reader_offers_page_and_value_jump_forms(client):

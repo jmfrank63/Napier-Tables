@@ -2,16 +2,35 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, abort, render_template_string, request
+from flask import Flask, Response, abort, render_template_string, request
 from sqlalchemy import Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from .integer_log import log10_scaled, round_ratio, scaled_to_text
+
+SITE_URL = os.environ.get(
+    "NAPIER_TABLES_SITE_URL", "https://logarithm-tables.common-work-education.co.uk"
+)
+EXTRA_HEAD = os.environ.get("NAPIER_TABLES_EXTRA_HEAD", "")
+
+
+def optimal_log_precision(precision: int) -> int:
+    """Fewest mantissa digits with no repeated entries anywhere in the table.
+
+    The log step between neighbouring rows shrinks as N grows, so the binding
+    constraint sits at the top of the range (N ≈ 10), where a step of 10^-p
+    moves the log by ≈ 0.43 · 10^-(p+1) — under one ulp at precision + 1
+    digits, which forces collisions. precision + 2 digits keeps every step
+    ≥ 4 ulp and the largest mantissa inside the d-digit column.
+    """
+    return precision + 2
 
 
 BASE_CSS = """
@@ -399,7 +418,7 @@ INDEX_TEMPLATE = """<!doctype html>
               <div class="optimal-row">
                 <input id="log_precision" name="log_precision" type="number" min="1" step="1" required>
                 <button type="button" class="button secondary" id="optimal-log"
-                  title="Fewest log digits with no repeated mantissas: precision + 1 (precision + 2 below precision 3)">Optimal</button>
+                  title="Fewest log digits with no repeated mantissas: precision + 2">Optimal</button>
               </div>
             </div>
           </div>
@@ -425,10 +444,16 @@ INDEX_TEMPLATE = """<!doctype html>
       if (!event.target.closest("#optimal-log")) return;
       var precision = parseInt(document.getElementById("precision").value, 10);
       if (precision >= 1) {
-        document.getElementById("log_precision").value =
-          precision <= 2 ? precision + 2 : precision + 1;
+        document.getElementById("log_precision").value = precision + 2;
       }
     });
+    var precisionInput = document.getElementById("precision");
+    var optimalButton = document.getElementById("optimal-log");
+    function syncOptimal() {
+      optimalButton.disabled = !(parseInt(precisionInput.value, 10) >= 1);
+    }
+    precisionInput.addEventListener("input", syncOptimal);
+    syncOptimal();
   </script>
 </body>
 </html>
@@ -780,7 +805,11 @@ def _render_table_list(rows: list[TableSpec]) -> str:
 
 def _render_page(rows: list[TableSpec]) -> str:
     return render_template_string(
-        INDEX_TEMPLATE, table_list=_render_table_list(rows), base_css=BASE_CSS
+        INDEX_TEMPLATE,
+        table_list=_render_table_list(rows),
+        base_css=BASE_CSS,
+        site_url=SITE_URL,
+        extra_head=EXTRA_HEAD,
     )
 
 
@@ -834,26 +863,27 @@ def _row_header(row_number: int, previous_row: int | None, precision: int) -> st
     return fraction[shared:]
 
 
-def _render_book_page(
-    spec: TableSpec,
+def _compose_book_page(
+    precision: int,
+    log_precision: int,
     page_number: int,
     total_pages: int,
-    rows: int = ROWS_PER_BOOK_PAGE,
-    highlight_row: int | None = None,
+    rows: int,
+    highlight_row: int | None,
 ) -> str:
-    first_value = 10**spec.precision + (page_number - 1) * rows * 10
-    last_value = min(first_value + rows * 10 - 1, 10 ** (spec.precision + 1) - 1)
+    first_value = 10**precision + (page_number - 1) * rows * 10
+    last_value = min(first_value + rows * 10 - 1, 10 ** (precision + 1) - 1)
     column_heads = "".join(f"<th>{column}</th>" for column in range(10))
     column_cols = '<col class="col-value">' * 10
-    max_row_number = (10 ** (spec.precision + 1) - 1) // 10
+    max_row_number = (10 ** (precision + 1) - 1) // 10
     n_width = len(str(max_row_number)) + 1
-    value_width = spec.log_precision + 1
-    lead = str(first_value // 10**spec.precision) + "."
+    value_width = log_precision + 1
+    lead = str(first_value // 10**precision) + "."
     body_rows = []
     previous_row: int | None = None
     for row_start in range(first_value, last_value + 1, 10):
         row_number = row_start // 10
-        row_header = _row_header(row_number, previous_row, spec.precision)
+        row_header = _row_header(row_number, previous_row, precision)
         previous_row = row_number
         row_class = (
             ' class="located"'
@@ -862,23 +892,41 @@ def _render_book_page(
         )
         cells = [f"<th>{row_header}</th>"]
         for column in range(10):
-            scaled = log10_scaled(
-                row_start + column, spec.precision, spec.log_precision
-            )
-            cells.append(f"<td>{scaled:0{spec.log_precision}d}</td>")
+            scaled = log10_scaled(row_start + column, precision, log_precision)
+            cells.append(f"<td>{scaled:0{log_precision}d}</td>")
         body_rows.append(f"<tr{row_class}>" + "".join(cells) + "</tr>")
     return BOOK_PAGE_TEMPLATE.format(
         page=page_number,
         total=total_pages,
         lead=lead,
-        start=scaled_to_text(first_value, spec.precision),
-        end=scaled_to_text(last_value, spec.precision),
+        start=scaled_to_text(first_value, precision),
+        end=scaled_to_text(last_value, precision),
         value_width=value_width,
         n_width=n_width,
         column_cols=column_cols,
         column_heads=column_heads,
         rows="\n      ".join(body_rows),
     )
+
+
+@lru_cache(maxsize=512)
+def _cached_book_page(
+    precision: int, log_precision: int, page_number: int, total_pages: int, rows: int
+) -> str:
+    return _compose_book_page(precision, log_precision, page_number, total_pages, rows, None)
+
+
+def _render_book_page(
+    spec: TableSpec,
+    page_number: int,
+    total_pages: int,
+    rows: int = ROWS_PER_BOOK_PAGE,
+    highlight_row: int | None = None,
+) -> str:
+    args = (spec.precision, spec.log_precision, page_number, total_pages, rows)
+    if highlight_row is None:
+        return _cached_book_page(*args)
+    return _compose_book_page(*args, highlight_row)
 
 
 def _render_book(
@@ -966,9 +1014,13 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app = Flask(__name__)
     default_database = Path(app.instance_path) / "tables.sqlite3"
     app.config.from_mapping(
-        SECRET_KEY="dev",
-        DATABASE_URL=f"sqlite+pysqlite:///{default_database}",
+        SECRET_KEY=os.environ.get("NAPIER_TABLES_SECRET_KEY", "dev"),
+        DATABASE_URL=os.environ.get(
+            "NAPIER_TABLES_DATABASE_URL", f"sqlite+pysqlite:///{default_database}"
+        ),
         DATABASE_PATH=str(default_database),
+        SITE_URL=SITE_URL,
+        EXTRA_HEAD=EXTRA_HEAD,
     )
     if test_config:
         app.config.update(test_config)
@@ -985,7 +1037,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.after_request
     def no_store(response):
-        response.headers["Cache-Control"] = "no-store"
+        if app.config.get("TESTING") or app.config.get("DEBUG"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     def get_session() -> Session:
